@@ -1,0 +1,1 @@
+t=datetime('now','TimeZone','local','Format','y-MM-dd HH:mm:ss')

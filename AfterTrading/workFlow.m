@@ -5,8 +5,8 @@ f_calTrading=0; %对当日的成交数据进行统计，并自动发送邮件
 f_addFunc=0;%Boothbay持仓生成
 f_loadFu=0;%导入期货权益
 w=windmatlab;
-s_date=datestr(today(),'yyyymmdd');
-%s_date='20181012';
+% s_date=datestr(today(),'yyyymmdd');
+s_date='20181031';
 [w_data]=w.tdaysoffset(-1,s_date);
 s_ydate=datestr(w_data,'yyyymmdd');
 
@@ -32,10 +32,10 @@ end
 if 1==f_calPnl
     stress=280;%需要每日都填入模型的Stress
     pnl64=0;%来自Jimmy的数据，坐标系期货账户
-    f_calPartOfAccounts=0;%计算部分账户
+    f_calPartOfAccounts=1;%计算部分账户
     f_adjustCapitals=0;%调整对应账户的规模
     f_updateDB=1;
-    subAccounts=['T02A'];%计算部分账户时对应的产品ID
+    subAccounts=['90'];%计算部分账户时对应的产品ID
     aCap.accounts=['T02A'];%对应需要调整规模账户的ID
     aCap.capitals=[9849517];
     % 计算pos trading pnl

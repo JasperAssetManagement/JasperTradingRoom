@@ -152,7 +152,7 @@ function [fundPct,hkPct,ntbPct,bondPct] = getQuotaInfo(pos,trade,s_date,s_ydate,
             [w_ydata]=w.wsd(codes,'close',hks_ydate,hks_ydate,'TradingCalendar=HKEX'); 
             hkPct.codes=w_code;
             hkPct.pctchanges=w_data./w_ydata-1; 
-            hkPct.closeprices=w_data;
+            hkPct.closeprices=w_ydata;
             hkPct.tradingStatus=1;           
             [w_data]=w.wsd('HKDCNY.EX','close',s_date,s_date);            
             hkPct.forexrates=w_data;
