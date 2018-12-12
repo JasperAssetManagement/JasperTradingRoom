@@ -64,8 +64,7 @@ end
 function trade = gettrade(date, jtr)
 conn=jtr.db88conn;
 sql=['SELECT [Account],[WindCode],[Qty],case when [Side]=1 then 1 else -1 end,qty*price,left([ExecuteTime],2)+SUBSTRING(ExecuteTime,4,2) ' ...
-    'FROM [JasperDB].[dbo].[JasperTradeDetail] where [Type]=''S'' and windcode in (select distinct Symbol from [JasperDB].[dbo].[JasperZFOrders]' ...
-    ' where [Date]=''' date ''') and Trade_dt=''' date ''' order by account;']; %and windcode != ''002601.SZ'' 
+    'FROM [JasperDB].[dbo].[JasperTradeDetail] where [Type]=''S'' and Trade_dt=''' date ''' order by account;']; %and windcode != ''002601.SZ'' 
 cdate=Utilities.getsqlrtn(conn,sql);
 trade=cell2table(cdate,'VariableNames',{'account','windcode','qty','side','amount','ctime'});
 trade.dtime=cellfun(@str2double,trade.ctime);
