@@ -29,11 +29,8 @@ classdef Utilities < handle
         
         %功能函数
         sendMail(to, subject, message); %发送邮件，第一次使用需初始化邮箱/密码信息
-        cCode = getStockWindCode(cInitCodes,cType); %获取wind的股票代码.SH/.SZ
-        
-        %temp
-        test_timer_classmethod(a, b);
-        
+        cCode = getStockWindCode(cInitCodes,cType); %获取wind的股票代码.SH/.SZ        
+    
     end
     
 end
