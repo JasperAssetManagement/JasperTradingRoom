@@ -1,1 +1,2 @@
-t=datetime('now','TimeZone','local','Format','y-MM-dd HH:mm:ss')
+% Utilities.test_timer_classmethod(1,2)
+t=datestr(now(),'yyyymmdd HH:MM:ss')

@@ -14,7 +14,7 @@ function genZFOrders(date,type,varargin)
 % 例: JasperTradingRoom.genZFOrders(today(),0,{'06' -40;'23' 0})
 % by Neo - 2017.11.29 
 jtr = JasperTradingRoom;
-stAccList = jtr.getaccounts;
+
 if ( nargin == 0 ) 
     date=datestr(today(),'yyyymmdd');
     %cAccouts=stAccList.ids;
@@ -40,6 +40,7 @@ else
         dchgAmts=cell2mat(varargin{1}(:,2));
     end    
 end
+stAccList = jtr.getaccounts(date);
 ydate=Utilities.tradingdate(datenum(date,'yyyymmdd'),-1,'outputStyle','yyyymmdd');
 w=windmatlab;
 %% 对每个账户进行处理，生成今天需要交易的单子
