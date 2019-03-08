@@ -38,6 +38,15 @@ end
         'WHERE [JasperDB].[dbo].[HKAccountPerformance].Account=b.account ' ...
         'and [JasperDB].[dbo].[HKAccountPerformance].Trade_dt=''' date ''' and b.Trade_dt=''' hks_ydate ''';'];
     Utilities.execsql(conn,sqlstr);
+    
+    %update model performance
+    [w_data]=w.wsd('HSHKI.HI','pct_chg',date,date,'TradingCalendar=HKEX');    
+    row = find(strcmp(ret.accounts,'90')==1);
+    volData = [{date},ret.accounts(row),{ret.totalReturn(row)*10000},{w_data*100},{(ret.totalReturn(row)*100-w_data)*100}];
+    conn=jtr.db88conn;
+    res = Utilities.upsert(conn,'JasperDB.dbo.modelPerformance',{'trade_dt','account_id',... %'TotalAsset',
+            'rct','benchmark','alpha'},{'trade_dt','account_id'},volData); 
+    fprintf('insert %d,update %d \n',sum(res==1),sum(res==0));    
 end    
 
 % get the pos of yesterday
@@ -94,5 +103,5 @@ function [ret] = calcReturn(pos,hkPct)
         pctChgs=hkPct.pctchgs(rows(isin==1));
         ratios=(qtys.*preCloses)/sum(qtys.*preCloses);
         ret.totalReturn(i)=sum(ratios.*pctChgs);        
-    end
+    end    
 end
