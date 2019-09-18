@@ -41,8 +41,11 @@ end
     
     %update model performance
     [w_data]=w.wsd('HSHKI.HI','pct_chg',date,date,'TradingCalendar=HKEX');    
-    row = find(strcmp(ret.accounts,'90')==1);
-    volData = [{date},ret.accounts(row),{ret.totalReturn(row)*10000},{w_data*100},{(ret.totalReturn(row)*100-w_data)*100}];
+    volData=[];
+    for i=1:size(ret.accounts,1)
+        % default net value = 1, then update nv=yestNV*(1+total return)
+        volData=[volData; {date},ret.accounts(i),{ret.totalReturn(i)*10000},{w_data*100},{(ret.totalReturn(i)*100-w_data)*100}];
+    end  
     conn=jtr.db88conn;
     res = Utilities.upsert(conn,'JasperDB.dbo.modelPerformance',{'trade_dt','account_id',... %'TotalAsset',
             'rct','benchmark','alpha'},{'trade_dt','account_id'},volData); 

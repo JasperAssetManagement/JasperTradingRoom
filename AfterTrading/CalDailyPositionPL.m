@@ -1,713 +1,507 @@
-function [flag] = CalDailyPositionPL(s_date,s_ydate,stress,pctChg,closePrice,f_calPartOfAccounts,subAccounts,f_adjustCapitals,aCap,f_updateDB,w)
+function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,w)
 %% calculate the position pnl
-
-%获取香港的最近T,T-1交易日
-hks_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
-hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
-            
-%benchmarkCode='H00300.CSI,H00905.CSI'; 
-benchmarkCode='000300.SH,000905.SH'; 
-
-[w_data]=w.wsd(benchmarkCode,'pct_chg',s_date,s_date);
-benchmark.index1=w_data(1,1)/100; 
-benchmark.index2=w_data(2,1)/100;
-benchmark.ratio=0.3;
-    
-%导入收盘后数据    
-[pos,trade,fuPos,account,model,flag] = getDBInfo(s_date,s_ydate,hks_date,hks_ydate,w);    
-[fundPct,hkPct,ntbPct,bondPct]=getQuotaInfo(pos,trade,s_date,s_ydate,hks_date,hks_ydate,w);
-
-   %计算个别账户
-if 1==f_calPartOfAccounts
-   [isin,rows]=ismember(subAccounts,account.ids);
-   account.ids=account.ids(rows(isin==1));  
-   account.capitals=account.capitals(rows(isin==1));
-end 
-
-   %如果赎回没有在AccountDetail里体现，这里改
-if 1==f_adjustCapitals  
-   [isin,rows]=ismember(aCap.accounts,account.ids); 
-   if sum(isin==0)>0
-       account.ids=[account.ids;aCap.accounts];
-       account.capitals=[account.capitals;aCap.capitals];
-   else
-       account.capitals(rows(isin==1))=account.capitals(rows(isin==1))+aCap.capitals;
-   end
+jtr = JasperTradingRoom;
+if 0==f_calHKDiffDay
+    s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyyymmdd');
+else
+    s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),-1,'market','HK','outputStyle','yyyymmdd');
 end
+%获取香港的最近T,T-1交易日
+% hks_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
+% hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 
-    %计算模型的return,用来算P-U
-    [isin,rows]=ismember(model.codes,pctChg.codes);
-    model.return=mean(pctChg.pctchanges(rows(isin==1)));
+excludedPosList={'IH1908.CFE'};
 
-    %计算position pnl
-    %TODO: 取美股的最近一个交易日
-%     s_date2=Utilities.tradingdate(today,-2,'outputStyle','yyyymmdd');
+%导入收盘后数据    
+[pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
+[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct] = getQuotaInfo(s_date); %bondPct,ctaPct,
+
+    
+if 0==f_calHKDiffDay
+    %s_date2=Utilities.tradingdate(today,-2,'outputStyle','yyyymmdd');
     [liusd, cusf]=getExtenalMarketInfo(s_date,s_ydate, w); 
     %w_data=[2.069,2.3416];
     dateDiff=Utilities.calDateDiff(s_ydate,s_date); %calculate the natural date diff 
+else
+    liusd=[];
+    cusf=[];
+    dateDiff=0;    
+end
 
-    [posPnl]=calPositionPnl(account,pos,fuPos,pctChg,closePrice,hkPct,ntbPct,fundPct,bondPct,liusd,benchmark,dateDiff,cusf);
-    
-    %计算trading pnl
-    [tradingPnl]=calTradingPnl(account,trade,fuPos,closePrice,hkPct,ntbPct,fundPct,bondPct);
-    
-    %计算定增股票池和10底层的Pnl
-%     [posPnl] = addPIPEPnl(posPnl,account,tradingPnl,s_date);    
-    %p-u
-    p_u=posPnl.subReturn-model.return; 
-    volData=[];
-    posPnl.totalReturn=posPnl.stockPosPnl+posPnl.hkPosPnl+posPnl.neeqPosPnl+posPnl.fuPosPnlSettle+posPnl.fundPosPnl+tradingPnl.stockTradePnl+tradingPnl.hkTradePnl+tradingPnl.neeqTradePnl+tradingPnl.fuTradePnlSettle+tradingPnl.fundTradePnl;
-    posPnl.totalReturn(isnan(posPnl.totalReturn))=0;  
-    posPnl.stockPosPnl(isnan(posPnl.stockPosPnl))=0;
-    s_dates=cell(size(account.ids,1),1);
-    s_dates(:)={s_date};
-    %volData=[volData; s_dates, account.ids, zeros(size(account.ids,1),4), {posPnl.totalReturn},{p_u},{alpha}];
-    for i=1:size(account.ids,1)       
-        volData=[volData; s_dates(i),account.ids(i),{posPnl.totalReturn(i)*10000},{1},{p_u(i)*10000},{stress},{'default'},{posPnl.alpha(i)*10000},... %%{0},{0},{0},{0},
-            {posPnl.stockPosPnl(i)*10000},{posPnl.hkPosPnl(i)*10000},{posPnl.neeqPosPnl(i)*10000},{posPnl.fuPosPnlClose(i)*10000},{posPnl.fuPosPnlSettle(i)*10000},...
-            {tradingPnl.stockTradePnl(i)*10000},{tradingPnl.hkTradePnl(i)*10000},{tradingPnl.neeqTradePnl(i)*10000},{tradingPnl.fuTradePnlClose(i)*10000},{tradingPnl.fuTradePnlSettle(i)*10000},...
-            {posPnl.fundPosPnl(i)*10000},{tradingPnl.fundTradePnl(i)*10000}];
+%计算position pnl
+if ~Utilities.isTradingDates(s_date, 'SZ')
+    if Utilities.isTradingDates(s_date, 'HK')
+        pos=pos(strcmp(pos.type,'HKS')==1,:);
+    else
+        return
     end
+end
+%不计算未上市新股
+conn=jtr.dbWindconn;
+sql=['SELECT S_IPO_PURCHASECODE+RIGHT(S_INFO_WINDCODE,3) FROM [dbo].[ASHAREIPO] where S_IPO_LISTDATE>''' s_ydate ''''];
+ipoList=Utilities.getsqlrtn(conn,sql);
+[isin,~]=ismember(pos.symbol,ipoList);
+pos=pos(isin==0,:);
+%排除一些特殊标的
+[isin,~]=ismember(pos.symbol,excludedPosList);
+pos=pos(isin==0,:);
 
-    if 1==f_updateDB        
-        conn=database('JasperDB','TraderOnly','112358.qwe','com.microsoft.sqlserver.jdbc.SQLServerDriver','jdbc:sqlserver://192.168.1.88:1433;databaseName=JasperDB');
-        res = upsert(conn,'JasperDB.dbo.AccountDetail',{'Trade_dt','Account',... %'TotalAsset',
-                'TotalReturn','Beta','portfolio_universe','stress','operator','a1','StockPosPnl','HKPosPnl',...
-                'NeeqPosPnl','FuPosPnlClose','FuPosPnlSettle','StockTradePnl','HKTradePnl','NeeqTradePnl','FuTradePnlClose','FuTradePnlSettle','FundPosPnl','FundTradePnl'},{'Trade_dt','Account'},volData);     
+tmpL=unique(account.id);
+[isin,~]=ismember(pos.account,tmpL);
+[posPnl]=calPositionPnl(account,pos(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
 
-        fprintf('insert %d,update %d \n',sum(res==1),sum(res==0));
+%计算trading pnl
+if ~isempty(trade)
+    [isin,~]=ismember(trade.account,tmpL);
+    [tradingPnl]=calTradingPnl(account,trade(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct);   
+end
+
+%入库
+if exist('tradingPnl','var')
+    posPnl=outerjoin(posPnl,tradingPnl,'MergeKeys',true);
+    posPnl=fillmissing(posPnl,'constant',0,'DataVariables',@isnumeric);
+end
+sumCol=posPnl.Properties.VariableNames(2:end);
+sumCol(strcmp(sumCol,'FuPosPnlClose')==1)=[];
+sumCol(strcmp(sumCol,'SpecialFee')==1)=[];
+posPnl.TotalReturn=sum(posPnl{:,sumCol},2);
+posPnl.Trade_dt=repmat({s_date},size(posPnl,1),1);
+
+%合并账户
+if ~isempty(mergeAccount)
+    tmpKey=mergeAccount.keys;
+    for i_acc=1:length(tmpKey)
+        tmpT=table(tmpKey(i_acc),{s_date},'VariableNames',{'Account','Trade_dt'});
+        sub_accL=mergeAccount(tmpKey{i_acc});
+        [isin,~]=ismember(sub_accL,tmpL);
+        if sum(isin)>0            
+            sub_accL=sub_accL(isin);
+            tmpA=zeros(1, size(posPnl,2)-2);
+            for i_sub=1:length(sub_accL)
+                tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub_accL{i_sub})==1,2:end-1));
+            end
+            tmpT=[tmpT array2table(tmpA,'VariableNames',posPnl.Properties.VariableNames(2:end-1))];
+            posPnl=[posPnl;tmpT];
+        end
     end
+end
+
+if 1==f_updateDB        
+    conn=jtr.db88conn;
+    res = upsert(conn,'JasperDB.dbo.AccountDetail',posPnl.Properties.VariableNames,{'Trade_dt','Account'},table2cell(posPnl));     
+
+    fprintf('insert %d,update %d \n',sum(res==1),sum(res==0));
+end
 
 end
 
-function [pos,trade,fuPos,account,model,flag] = getDBInfo(s_date,s_ydate,hks_date,hks_ydate,w)
+function [pos,trade] = getDBInfo(s_date,s_ydate,jtr)
 %导入收盘后数据     
-    [pos,flag]=getPosition(s_ydate); 
-    if 0==flag return; end;
-    
-    [trade,flag]=getTradeInfo(s_date);    
-    if 0==flag return; end;
-    
-    [fuPos,flag]=getFutureInfo(s_date,s_ydate,hks_date,hks_ydate,pos,trade,w); 
-    if 0==flag return; end;
-    
-    [account,flag]=getAccountInfo(s_ydate); 
-    if 0==flag return; end;    
-    
-    [model,flag]=getModelInfo();
-    if 0==flag return; end;
+    [pos]=getPosition(s_ydate,jtr);     
+    [trade]=getTradeInfo(s_date,jtr);
 end
 
-function [fundPct,hkPct,ntbPct,bondPct] = getQuotaInfo(pos,trade,s_date,s_ydate,hks_date,hks_ydate,w)
-    %取基金的涨跌幅和收盘价    
-    rows=(strcmp('F',pos.types)==1);    
-    if sum(rows)>0
-        codes=pos.codes(rows);
-    else 
-        codes={};
-    end
-    rows1=(strcmp('F',trade.types)==1);
-    if sum(rows1)>0
-        codes=union(codes,trade.codes(rows1));
-    end   
-    codes=unique(codes);
-    if sum(rows)>0 || sum(rows1)>0
-        try
-            %[w_data,w_code]=w.wsd(codes,'windcode',s_date,s_date);
-            %fundPct.codes=w_code;
-            %windCode=w_data;
-            windCode=codes;
-            fundPct.codes=codes;
-            [w_data]=w.wsd(windCode,'pct_chg',s_date,s_date);   
-            fundPct.pctchanges=w_data/100; 
-            [w_data]=w.wsd(windCode,'close',s_date,s_date);  
-            fundPct.closeprices=w_data;
-            fundPct.tradingStatus=1;
-        catch err
-            fprintf(err.message);
-            fprintf('Error(%s): %s Fund has error in get data. \n',datestr(now(),0),s_date);
-            fundPct.tradingStatus=0;
-        end  
+function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct] = getQuotaInfo(s_date) %bondPct,ctaPct,
+    root_path='\\192.168.1.88\Trading Share\daily_quote\';
+    if Utilities.isTradingDates(s_date, 'HK') 
+        hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
     else
-        fundPct.tradingStatus=0;
-    end    
-    
-    %取港股的涨跌幅和前收盘价(算ratio)
-    rows=(strcmp('HKS',pos.types)==1);    
-    if sum(rows)>0
-        codes=pos.codes(rows);
-    else 
-        codes={};
+        hkPct=table;
     end
-    rows1=(strcmp('HKS',trade.types)==1);
-    if sum(rows1)>0
-        codes=union(codes,trade.codes(rows1));
-    end   
-    codes=unique(codes);
-    if sum(rows)>0 || sum(rows1)>0
-        try
-%             [w_data,w_code]=w.wsd(codes,'pct_chg',s_date,s_date,'TradingCalendar=HKEX');
-               
-            [w_data,w_code]=w.wsd(codes,'close',hks_date,hks_date,'TradingCalendar=HKEX'); 
-            [w_ydata]=w.wsd(codes,'close',hks_ydate,hks_ydate,'TradingCalendar=HKEX'); 
-            hkPct.codes=w_code;
-            hkPct.pctchanges=w_data./w_ydata-1; 
-            hkPct.closeprices=w_ydata;
-            hkPct.tradingStatus=1;           
-            [w_data]=w.wsd('HKDCNY.EX','close',s_date,s_date);            
-            hkPct.forexrates=w_data;
-        catch err
-            fprintf(err.message);
-            fprintf('Error(%s): %s HK has error in get data. \n',datestr(now(),0),s_date);
-            hkPct.tradingStatus=0;
-        end  
+    if Utilities.isTradingDates(s_date, 'SZ') 
+        stockPct=readtable([root_path 'stock_' s_date '.csv']);
+        fundPct=readtable([root_path 'fund_' s_date '.csv']);
+        fuPct=readtable([root_path 'future_' s_date '.csv']);
+    %     bondPct=readtable([root_path 'bond_' s_date '.csv']);
+    %     ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
+        forexPct=readtable([root_path 'forex_' s_date '.csv']);
+        optionPct=readtable([root_path 'option_' s_date '.csv']);
     else
-        hkPct.tradingStatus=0;
-    end    
-   
-    %取新三板的涨跌幅和前收盘价(算ratio)
-    rows=(strcmp('NTB',pos.types)==1);    
-    if sum(rows)>0
-        codes=pos.codes(rows);
-    else 
-        codes={};
-    end
-    rows1=(strcmp('NTB',trade.types)==1);
-    if sum(rows1)>0
-        codes=union(codes,trade.codes(rows1));
-    end   
-    codes=unique(codes);
-    if sum(rows)>0 || sum(rows1)>0
-        try
-            [w_data,w_code]=w.wsd(codes,'pct_chg',s_date,s_date);   
-            if ~iscell(w_data)   
-                ntbPct.codes=w_code;
-                ntbPct.pctchanges=w_data/100; 
-                ntbPct.pctchanges(isnan(ntbPct.pctchanges))=0;
-                [w_data]=w.wsd(codes,'close',s_date,s_date);  
-                if ~iscell(w_data)   
-                    ntbPct.closeprices=w_data;                   
-                end   
-                ntbPct.tradingStatus=1;
-            else
-                ntbPct.tradingStatus=0;
-            end            
-        catch err
-            fprintf(err.message);
-            fprintf('Error(%s): %s NTB has error in get data. \n',datestr(now(),0),s_date);
-            ntbPct.tradingStatus=0;
-        end   
-    else
-        ntbPct.tradingStatus=0;
-    end
-    
-    %取二级市场交易的债券的涨跌幅和前收盘价(算ratio)
-    rows=(strcmp('B',pos.types)==1);    
-    if sum(rows)>0
-        codes=pos.codes(rows);
-    else 
-        codes={};
-    end
-    rows1=(strcmp('B',trade.types)==1);
-    if sum(rows1)>0
-        codes=union(codes,trade.codes(rows1));
-    end   
-    codes=unique(codes);
-    if sum(rows)>0 || sum(rows1)>0
-        try
-            %[w_data,w_code]=w.wsd(codes,'windcode',s_date,s_date);
-            %fundPct.codes=w_code;
-            %windCode=w_data;
-            windCode=codes;
-            bondPct.codes=codes;
-            [w_data]=w.wsd(windCode,'pct_chg',s_date,s_date);  
-            w_data(isnan(w_data))=0;
-            bondPct.pctchanges=w_data/100; 
-            [w_data]=w.wsd(windCode,'close',s_ydate,s_date,'PriceAdj=DP');  
-            w_data(isnan(w_data))=0;
-            bondPct.preclose=w_data(1,:)';
-            bondPct.closeprices=w_data(2,:)';
-            bondPct.tradingStatus=1;
-        catch err
-            fprintf(err.message);
-            fprintf('Error(%s): %s Bond has error in get data. \n',datestr(now(),0),s_date);
-            bondPct.tradingStatus=0;
-        end  
-    else
-        bondPct.tradingStatus=0;
+        stockPct=table;
+        fundPct=table;
+        fuPct=table;        
+        optionPct=table;
+        s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), 0, 'outputStyle','yyyymmdd');
+        forexPct=readtable([root_path 'forex_' s_ydate '.csv']);
     end
 end
 
 %取出各账户持仓
-function [pos,flag] = getPosition(s_ydate)
-flag=1; %1：成功；0：失败    
-    sqlstr=strcat('SELECT [Account],case when [Type]=''S'' then left([WindCode],6) else [WindCode] end,case when side=1 then [Qty]-dzqty else -[Qty] end,[Type],[Multiplier],[ClosePrice]',32,...
-        'FROM [JasperDB].[dbo].[JasperPositionNew] where dzqty<qty and Trade_dt=''',s_ydate,''' order by account;');
-    %Account not in (SELECT distinct [BaseFundAccount] FROM [JasperDB].[dbo].[JasperPIPEProportion] union',32,...
-    %    'SELECT distinct [FundAccount] FROM [JasperDB].[dbo].[JasperPIPEProportion]) and 
-    data=DBExcutor88(sqlstr);
+function [pos] = getPosition(s_ydate,jtr)
+fprintf('Info(%s): getPosition-get (%s) Pos record. \n',datestr(now(),0),s_ydate);
+    conn = jtr.db88conn;
+    sqlstr=strcat('SELECT [Account],[WindCode],(1.5-[side])*2*[Qty] as Qty,[Type]',32,...
+        'FROM [JasperDB].[dbo].[JasperPositionNew] where Trade_dt=''',s_ydate,''' order by account;');
+    data=Utilities.getsqlrtn(conn,sqlstr);
     if size(data)<=0
-        fprintf('Error(%s): %s Position has not found in DB. \n',datestr(now(),0),s_ydate);
-        flag=0;        
+        fprintf('getPosition Error(%s): %s Position has not found in DB. \n',datestr(now(),0),s_ydate);       
     else
-        pos.accounts=data(:,1);
-        pos.codes=data(:,2);
-        pos.qtys=cell2mat(data(:,3));
-        pos.types=data(:,4);
-        pos.multipliers=cell2mat(data(:,5));
-        pos.closeprices=cell2mat(data(:,6));        
+        pos=cell2table(data,'VariableNames',{'account' 'symbol' 'volume' 'type'});      
     end 
 end
 
 %取出交易数据
-function [trade,flag]=getTradeInfo(s_date)
-flag=1;    
-    sqlstr=strcat('SELECT [Account],case when [Type]=''S'' then left([WindCode],6) else [WindCode] end,case when side=2 then -[Qty] else [Qty] end,[Type],[Price],[Commission]+[Fee]',32,...
-        'FROM [JasperDB].[dbo].[JasperTradeDetail] where Trade_dt=''',s_date,''' order by account;');
-    %Account not in (SELECT distinct [BaseFundAccount] FROM [JasperDB].[dbo].[JasperPIPEProportion] union',32,...
-    %    'SELECT distinct [FundAccount] FROM [JasperDB].[dbo].[JasperPIPEProportion]) and 
-    data=DBExcutor88(sqlstr);
+function [trade]=getTradeInfo(s_date,jtr)
+fprintf('Info(%s): getTradeInfo-get (%s) Trade record. \n',datestr(now(),0),s_date);
+    conn = jtr.db88conn;
+    sqlstr=strcat('SELECT [Account],[WindCode],qty*(1.5-side)*2,[Type],Price,OCtag',32,...
+        'FROM [JasperDB].[dbo].[JasperTradeDetail] where Trade_dt=''',s_date,''' order by account;'); 
+    data=Utilities.getsqlrtn(conn,sqlstr);
     if size(data)<=0
-        fprintf('Error(%s): %s trade has not found in DB. \n',datestr(now(),0),s_date);
-        flag=0;
+        fprintf('getTradeInfo Error(%s): %s Trade record has not found in DB. \n',datestr(now(),0),s_date);
+        trade=table;
     else
-        trade.accounts=data(:,1);
-        trade.codes=data(:,2);
-        trade.qtys=cell2mat(data(:,3));
-        trade.types=data(:,4);      
-        trade.prices=cell2mat(data(:,5));    
-        trade.fees=cell2mat(data(:,6));
+        trade=cell2table(data,'VariableNames',{'account' 'symbol' 'volume' 'type' 'price' 'tag'}); 
     end
 end
 
-%取出所有期货合约的收盘价和结算价
-function [fuPos,flag]=getFutureInfo(s_date,s_ydate,hks_date,hks_ydate,pos,trade,w)
-flag=1;    
-    fuPos.codes=unique([pos.codes(strcmp(pos.types,'FU')==1 | strcmp(pos.types,'CTA')==1);trade.codes(strcmp(trade.types,'FU')==1 | strcmp(trade.types,'CTA')==1)]);
-    try
-        [fuPos.close, fuPos.settle, fuPos.preSettle, fuPos.closePctchg,  fuPos.settlePctchg, fuPos.multipliers]=getFuPrices(fuPos.codes,s_date,s_ydate,hks_date,hks_ydate,w); 
-    catch err
-        fprintf('Error(%s): %s Future prices is not ready(%s). \n',datestr(now(),0),s_date,err.message);
-        flag=0;
+function [multiplier] = getMultiplier(type,symbol)
+type=upper(type);
+if strcmp(type,'FU')==1
+    if strcmp(symbol{1}(1:2),'IC')==1
+        multiplier=200;
+    else
+        multiplier=300;
     end
+elseif strcmp(type,'OPTION')==1
+    multiplier=10000;
+else
+    multiplier=1;
+end
 end
 
-%%取期货的结算价和收盘价
-function [closePrice, settlePrice, preSettlePrice, closePctchg, settlePctchg, multiplier] = getFuPrices(code,date,ydate,hks_date,hks_ydate,w)
-%     [w_data]=w.wsd(code,'pct_chg',date,date);   
-%     closePctchg=w_data/100; 
+function []=checkRecords(pos, pct)
+[isin,~]=ismember(pos.symbol, pct.symbol);
+if find(isin==0)>0
+    fprintf('Symbol do not included in pct files! \n');
+    fprintf('%s \n',pos.symbol{isin==0});
+end
+end
+
+%----------------------------------------------------------------%
+function [posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date)
+fprintf('Info(%s):calPositionPnl-getMultiplier! \n',datestr(now(),0));
+tmp_t=rowfun(@getMultiplier,pos,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
+pos=[pos tmp_t];
+%处理股票
+if Utilities.isTradingDates(s_date, 'SZ')     
+    stock=pos(strcmp(pos.type,'S')==1,:);    
+    future=pos(strcmp(pos.type,'FU')==1,:);
+    fund=pos(strcmp(pos.type,'F')==1,:);
+    option=pos(strcmp(pos.type,'Option')==1,:);
     
-    [w_data]=w.wsd(code,'close',ydate,date);
-    closePrice = w_data(2,:); 
-    closePctchg = w_data(2,:)./w_data(1,:)-1;
-        
-    [w_data]=w.wsd(code,'settle',ydate,date);
-    preSettlePrice = w_data(1,:);  
-    settlePrice = w_data(2,:);     
-    settlePctchg = w_data(2,:)./w_data(1,:)-1; %交易所结算的是收盘价/结算价，所以要重新算
-    
-    [w_data]=w.wsd(code,'contractmultiplier',date,date);
-    multiplier=w_data;
-    
-    %特殊处理,对香港的期货，按照香港的交易日来取
-%     indexC=strfind(code,'.HK');
-%     index = find(~(cellfun('isempty', indexC)));
-%     tpc=code(index);
-%     
-%     [w_data]=w.wsd(tpc,'close',hks_ydate,hks_date);
-%     closePrice(index) = w_data(2,:); 
-%     closePctchg(index) = w_data(2,:)./w_data(1,:)-1;
-%         
-%     [w_data]=w.wsd(tpc,'settle',hks_ydate,hks_date);
-%     preSettlePrice(index) = w_data(1,:);  
-%     settlePrice(index) = w_data(2,:);     
-%     settlePctchg(index) = w_data(2,:)./w_data(1,:)-1;
-end
-
-%取出模型的股票池
-function [model,flag]=getModelInfo()
-flag=1;
-    sqlstr='SELECT [ModelID],[Code],[Weight] FROM [JasperDB].[dbo].[JasperModelInfo] where Trade_dt=(select MAX(trade_dt) FROM [JasperDB].[dbo].[JasperModelInfo]);'; 
-    data=DBExcutor88(sqlstr);
-    if size(data)<0
-        fprintf('Error(%s): model info has not found in DB. \n',datestr(now(),0));
-        flag=0;
+    if ~isempty(stock)
+        fprintf('Info(%s):calPositionPnl-Deal stock Records! \n',datestr(now(),0));
+        checkRecords(stock, stockPct);  
+        stock=join(stock,stockPct,'Keys','symbol');  
+        stock.posPnl=stock.change_price.*stock.volume_stock; 
+        stockPosPnl=varfun(@sum,stock,'InputVariables','posPnl','GroupingVariables','account');    
+        stockPosPnl.GroupCount=[];    
+        stockPosPnl.Properties.VariableNames={'Account','StockPosPnl'};
     else
-        model.ids=data(:,1);
-        model.codes=data(:,2);
-        model.weights=cell2mat(data(:,3));       
-    end   
-end
-
-% get the account info
-function [account,flag]=getAccountInfo(s_ydate)
-flag=1;
-%05由于分拆了好几个账户，没有合并导数据前手动算；67，CTA
-    sqlstr=strcat('SELECT [Account] FROM [JasperDB].[dbo].[AccountDetail] where Account not in (''5A'',''64A'',''64B'',''64C'',''37'',''10N'',''82HK'') and Trade_dt=''',s_ydate,'''');  
-    data=DBExcutor88(sqlstr);
-    if size(data)<0
-        fprintf('Error(%s): account info has not found in DB. \n',datestr(now(),0));
-        flag=0;
-    else
-        account.ids=data(:,1);              
-    end   
-    jtr=JasperTradingRoom;
-    cAccs=jtr.getaccounts(s_ydate);
-    [isin,rows]=ismember(account.ids,cAccs.ids);       
-    account.capitals=cAccs.assets(rows(isin==1));
-end
-
-%计算position pnl
-function [posPnl]=calPositionPnl(account,pos,fuPos,pctChg,closePrice,hkPct,ntbPct,fundPct,bondPct,libor,benchmark,dateDiff,cusf)
-%flag=1;
-posPnl.accounts=[];
-posPnl.stockPosPnl=[];
-posPnl.subReturn=[];
-posPnl.hkPosPnl=[];
-posPnl.neeqPosPnl=[];
-posPnl.fuPosPnlClose=[];
-posPnl.fuPosPnlSettle=[];
-posPnl.fundPosPnl=[];
-posPnl.alpha=[];
-for i=1:length(account.ids)
-    capital=account.capitals(i);
-%     if capital==0
-%         continue;
-%     end
-    posPnl.accounts=[posPnl.accounts;account.ids(i)];
-    %log=strcat(log,sprintf('Info(%s): Dealing with position of account(%s) %s, capital: %f . \n',datestr(now(),0),account.ids{i},account.names{i},capital));
-    fprintf('Info(%s): Dealing with position of account(%s), capital: %f . \n',datestr(now(),0),account.ids{i},capital);
-    %计算position pnl
-    %股票
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & strcmp(pos.types,'S')==1);
-    if sum(rows)>0
-        stock.codes=pos.codes(rows);     
-        stock.qtys=pos.qtys(rows);    
-        [isin,rows]=ismember(stock.codes,pctChg.codes);
-        stock.pctchgs=pctChg.pctchanges(rows(isin==1));
-        
-        %去掉没有RQuotation的股票，大部分是新股
-        if ~isempty(rows(isin==0))
-            row=find(isin==0);
-            fprintf('Info(%s): %s do not have RQuotation. \n',datestr(now(),0),stock.codes{row});
-            stock.codes(row)=[];
-            stock.qtys(row)=[];          
-        end
-        
-        if size(stock.codes,2)>0
-            [isin,rows]=ismember(stock.codes,closePrice.codes);
-            stock.closeprices=closePrice.preprices(rows(isin==1));
-
-            stock.ratios=stock.qtys.*stock.closeprices/capital;
-            posPnl.stockPosPnl=[posPnl.stockPosPnl;sum(stock.ratios.*stock.pctchgs)];    
-            %计算return，当做100%持仓计算
-            subRatios=stock.qtys.*stock.closeprices/sum(stock.qtys.*stock.closeprices);
-            posPnl.subReturn=[posPnl.subReturn;sum(subRatios.*stock.pctchgs)];
-            
-            %根据实际仓位市值比例来计算benchmark
-            subMV=closePrice.mvs(rows(isin==1));
-            bmRatio1=sum(subRatios(subMV>=200))+benchmark.ratio*sum(subRatios(subMV>=100 & subMV<200));
-            bmRatio2=sum(subRatios(subMV<100))+(1-benchmark.ratio)*sum(subRatios(subMV>=100 & subMV<200));           
-            i_benchmark=(bmRatio1*benchmark.index1+bmRatio2*benchmark.index2);
-            posPnl.alpha=[posPnl.alpha;posPnl.subReturn(end)-i_benchmark];
-
-            fprintf('Info(%s): account(%s) : has dealed %f stock position records. \n',datestr(now(),0),account.ids{i},...
-                length(stock.codes));
-            if strcmp('86',account.ids{i}) == 1 || strcmp('88',account.ids{i}) == 1 %boothbay, argo fund的stock持仓减去1month Libor+90bps        
-                posPnl.stockPosPnl(end)=posPnl.stockPosPnl(end)-abs(sum(stock.ratios)*(libor(1)/100+0.009)/365*dateDiff);  
-            end
-            
-            if strcmp('88',account.ids{i}) == 1 %记录argo fund的多头仓位市值
-                posLongMV88=sum(stock.qtys.*stock.closeprices); 
-            end
-        else
-            posPnl.stockPosPnl=[posPnl.stockPosPnl;0];   
-            posPnl.subReturn=[posPnl.subReturn;0];
-            posPnl.alpha=[posPnl.alpha;0];            
-        end
-    else
-        posPnl.stockPosPnl=[posPnl.stockPosPnl;0];   
-        posPnl.subReturn=[posPnl.subReturn;0];
-        posPnl.alpha=[posPnl.alpha;0];
-        posLongMV88=0;
-    end
-        
-    %Fund 
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & strcmp(pos.types,'F')==1);
-    if sum(rows)>0 && 1==fundPct.tradingStatus
-        stock.codes=pos.codes(rows);     
-        stock.qtys=pos.qtys(rows);   
-% 		stock.closeprices=pos.closeprices(rows); 		
-        [isin,rows]=ismember(stock.codes,fundPct.codes);
-        stock.pctchgs=fundPct.pctchanges(rows(isin==1));
-        stock.closeprices=fundPct.closeprices(rows(isin==1));
-
-        stock.ratios=stock.qtys.*stock.closeprices/capital;
-        posPnl.fundPosPnl=[posPnl.fundPosPnl;sum(stock.ratios.*stock.pctchgs)];            
-
-        fprintf('Info(%s): account(%s) : has dealed %f fund position records. \n',datestr(now(),0),account.ids{i},...
-            length(stock.codes));  
-        
-        if strcmp('86',account.ids{i}) == 1 || strcmp('88',account.ids{i}) == 1 %boothbay,argo fund的fund持仓减去费用
-            posPnl.fundPosPnl(end)=posPnl.fundPosPnl(end)-abs(sum(stock.ratios)*(0.045-libor(2)/100)/365*dateDiff);  
-        end    
-        
-        if strcmp('88',account.ids{i}) == 1 %记录argo fund的空头仓位市值
-            posShortMV88=sum(stock.qtys.*stock.closeprices); 
-        end  
-    else
-        posPnl.fundPosPnl=[posPnl.fundPosPnl;0];
-        posShortMV88=0;
-    end
-        
-    %港股HKS
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & strcmp(pos.types,'HKS')==1);    
-    if sum(rows)>0 && 1==hkPct.tradingStatus
-        stock.codes=pos.codes(rows);
-        stock.qtys=pos.qtys(rows);
-
-        [isin,rows]=ismember(stock.codes,hkPct.codes);
-        stock.pctchgs=hkPct.pctchanges(rows(isin==1));
-        stock.closeprices=hkPct.closeprices(rows(isin==1)); 
-        stock.ratios=stock.qtys.*stock.closeprices*hkPct.forexrates/capital;
-
-        posPnl.hkPosPnl=[posPnl.hkPosPnl;sum(stock.ratios.*stock.pctchgs)]; 
-
-        fprintf('%s \n Info(%s): account(%s) : has dealed %f HK stock position records. \n',datestr(now(),0),account.ids{i},...
-            length(stock.codes));
-    else
-         posPnl.hkPosPnl=[posPnl.hkPosPnl;0]; 
+        stockPosPnl=table;
     end
     
-     %新三板：NTB(NEEQ)
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & strcmp(pos.types,'NTB')==1);    
-    if sum(rows)>0 && 1==ntbPct.tradingStatus
-        stock.codes=pos.codes(rows);
-        stock.qtys=pos.qtys(rows);
-
-        [isin,rows]=ismember(stock.codes,ntbPct.codes);
-        stock.pctchgs=ntbPct.pctchanges(rows(isin==1));
-        stock.closeprices=ntbPct.closeprices(rows(isin==1));
-        stock.ratios=stock.qtys.*stock.closeprices/capital;
-
-        posPnl.neeqPosPnl=[posPnl.neeqPosPnl;sum(stock.ratios.*stock.pctchgs)]; 
-
-        fprintf('Info(%s): account(%s) : has dealed %f HK stock position records. \n',datestr(now(),0),account.ids{i},...
-            length(stock.codes));
+    if ~isempty(future)
+        fprintf('Info(%s):calPositionPnl-Deal future Records! \n',datestr(now(),0));
+        checkRecords(future, fuPct);  
+        future=join(future,fuPct,'Keys','symbol');   
+        future.posPnlClose=(future.close-future.pre_close).*future.volume_future.*future.multiplier;
+        future.posPnlSettle=(future.settle-future.pre_settle).*future.volume_future.*future.multiplier;
+        futurePosPnlClose=varfun(@sum,future,'InputVariables','posPnlClose','GroupingVariables','account');
+        futurePosPnlSettle=varfun(@sum,future,'InputVariables','posPnlSettle','GroupingVariables','account');
+        futurePosPnlClose.GroupCount=[];
+        futurePosPnlSettle.GroupCount=[];
+        futurePosPnlClose.Properties.VariableNames={'Account','FuPosPnlClose'};
+        futurePosPnlSettle.Properties.VariableNames={'Account','FuPosPnlSettle'};
     else
-         posPnl.neeqPosPnl=[posPnl.neeqPosPnl;0]; 
+        futurePosPnlClose=table;
+        futurePosPnlSettle=table;
     end
     
-    %期货
-    %取收盘价算一个(发trading pnl)，结算价算一个(发净值)  
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & (strcmp(pos.types,'FU')==1 | strcmp(pos.types,'CTA')==1));
-    if sum(rows)>0
-        fu.codes=pos.codes(rows);
-        fu.qtys=pos.qtys(rows);
-
-        [isin,rows]=ismember(fu.codes,fuPos.codes);       
-        fu.settleprices=fuPos.preSettle(rows(isin==1))';
-        fu.closePctchg=fuPos.closePctchg(rows(isin==1))';
-        fu.settlePctchg=fuPos.settlePctchg(rows(isin==1))'; 
-        fu.multipliers=fuPos.multipliers(rows(isin==1));
-
-        %fu.ratiosClose=fu.closeprices.*fu.qtys.*fu.multipliers/capital;
-        fu.ratios=fu.settleprices.*fu.qtys.*fu.multipliers/capital;
-        posPnl.fuPosPnlClose=[posPnl.fuPosPnlClose;sum(fu.ratios.*fu.closePctchg)];
-        posPnl.fuPosPnlSettle=[posPnl.fuPosPnlSettle;sum(fu.ratios.*fu.settlePctchg)];
-        fprintf('Info(%s): account(%s) : has dealed %f future position records. \n',...
-            datestr(now(),0),account.ids{i},length(fu.codes));  
+    if ~isempty(fund)
+        fprintf('Info(%s):calPositionPnl-Deal fund Records! \n',datestr(now(),0));
+        checkRecords(fund, fundPct);
+        fund=join(fund,fundPct,'Keys','symbol');
+        fund.posPnl=fund.change_price.*fund.volume_fund;
+        fundPosPnl=varfun(@sum,fund,'InputVariables','posPnl','GroupingVariables','account');
+        fundPosPnl.GroupCount=[];
+        fundPosPnl.Properties.VariableNames={'Account','FundPosPnl'};
     else
-        posPnl.fuPosPnlClose=[posPnl.fuPosPnlClose;0];
-        posPnl.fuPosPnlSettle=[posPnl.fuPosPnlSettle;0];
-    end
-    
-    %Bond 算到股票里
-    rows=find(strcmp(pos.accounts,account.ids{i})==1 & strcmp(pos.types,'B')==1);
-    if sum(rows)>0 && 1==bondPct.tradingStatus
-        stock.codes=pos.codes(rows);     
-        stock.qtys=pos.qtys(rows);   
-				
-        [isin,rows]=ismember(stock.codes,bondPct.codes);
-        stock.pctchgs=bondPct.pctchanges(rows(isin==1));
-        stock.closeprices=bondPct.closeprices(rows(isin==1)); 
-
-        stock.ratios=stock.qtys.*stock.closeprices/capital;
-        posPnl.stockPosPnl(end)=posPnl.stockPosPnl(end)+sum(stock.ratios.*stock.pctchgs);            
-
-        fprintf('Info(%s): account(%s) : has dealed %f bond position records. \n',datestr(now(),0),account.ids{i},...
-            length(stock.codes));    
-    end
-    
-    %特殊处理
-    if strcmp('88',account.ids{i}) == 1 %argo fund 要减去汇率盈亏
-        posPnl.stockPosPnl(end)=posPnl.stockPosPnl(end)-(posLongMV88+posShortMV88)/capital*cusf;        
-    end
-end
-
-end
-
-%计算trading pnl
-function [tradingPnl]=calTradingPnl(account,trade,fuPos,closePrice,hkPct,ntbPct,fundPct,bondPct)
-    %股票 
-    tradingPnl.accounts=[];
-    tradingPnl.stockTradePnl=[];
-    tradingPnl.hkTradePnl=[];
-    tradingPnl.neeqTradePnl=[];
-    tradingPnl.fuTradePnlClose=[];
-    tradingPnl.fuTradePnlSettle=[];
-    tradingPnl.fundTradePnl=[];
-    for i=1:length(account.ids)
-         capital=account.capitals(i);
-%         if capital==0
-%             continue;
-%         end
-        tradingPnl.accounts=[tradingPnl.accounts;account.ids(i)];
-        rows=strcmp(trade.accounts,account.ids{i})==1 & strcmp(trade.types,'S')==1;
-        if sum(rows)>0
-            stock.codes=trade.codes(rows);
-            stock.qtys=trade.qtys(rows);
-            stock.prices=trade.prices(rows);
-            stock.fees=trade.fees(rows);
-            [isin,rows]=ismember(stock.codes,closePrice.codes);
-            stock.closeprices=closePrice.prices(rows(isin==1));
-            
-            %去掉没有SQuotation的股票
-            if ~isempty(rows(isin==0))
-                row=find(isin==0);
-                fprintf('Info(%s): %s do not have SQuotation. \n',datestr(now(),0),cell2mat(stock.codes(row)));
-                stock.codes(row)=[];
-                stock.qtys(row)=[]; 
-                stock.prices(row)=[];
-                stock.fees(row)=[];
-            end
-            if size(stock.codes,2)>0
-                tradingPnl.stockTradePnl=[tradingPnl.stockTradePnl;(sum(stock.qtys.*(stock.closeprices-stock.prices))-sum(stock.fees))/capital];            
-                fprintf('Info(%s): account(%s) : has dealed %f stock trading records. \n',datestr(now(),0),account.ids{i},...
-                    length(stock.codes));
-            else
-                tradingPnl.stockTradePnl=[tradingPnl.stockTradePnl;0];
-            end
-        else
-            tradingPnl.stockTradePnl=[tradingPnl.stockTradePnl;0];
-        end
-
-        %Fund
-        rows=strcmp(trade.accounts,account.ids{i})==1 & strcmp(trade.types,'F')==1;
-        if sum(rows)>0 && 1==fundPct.tradingStatus
-            stock.codes=trade.codes(rows);
-            stock.qtys=trade.qtys(rows);
-            stock.prices=trade.prices(rows);
-            stock.fees=trade.fees(rows);
-            [isin,rows]=ismember(stock.codes,fundPct.codes);
-            stock.closeprices=fundPct.closeprices(rows(isin==1));
-
-           tradingPnl.fundTradePnl=[tradingPnl.fundTradePnl;(sum(stock.qtys.*(stock.closeprices-stock.prices))-sum(stock.fees))/capital];
-            fprintf('Info(%s): account(%s) : (%s) has dealed %f fund stock trading records. \n',datestr(now(),0),account.ids{i},...
-                length(stock.codes));   
-        else
-            tradingPnl.fundTradePnl=[tradingPnl.fundTradePnl;0];
-        end
-        
-        %港股HKS
-        rows=strcmp(trade.accounts,account.ids{i})==1 & strcmp(trade.types,'HKS')==1;
-        if sum(rows)>0
-            stock.codes=trade.codes(rows);
-            stock.qtys=trade.qtys(rows);
-            stock.prices=trade.prices(rows);
-            stock.fees=trade.fees(rows);
-            [isin,rows]=ismember(stock.codes,hkPct.codes);
-            stock.closeprices=hkPct.closeprices(rows(isin==1));
-
-            tradingPnl.hkTradePnl=[tradingPnl.hkTradePnl;(sum(stock.qtys.*(stock.closeprices-stock.prices))-sum(stock.fees))*hkPct.forexrates/capital];
-            fprintf('Info(%s): account(%s) : (%s) has dealed %f hk stock trading records. \n',datestr(now(),0),account.ids{i},...
-                length(stock.codes));
-        else
-             tradingPnl.hkTradePnl=[tradingPnl.hkTradePnl;0]; 
-        end
-        
-        %新三板：NTB(NEEQ)
-        rows=strcmp(trade.accounts,account.ids{i})==1 & strcmp(trade.types,'NTB')==1;
-        if sum(rows)>0
-            stock.codes=trade.codes(rows);
-            stock.qtys=trade.qtys(rows);
-            stock.prices=trade.prices(rows);
-            stock.fees=trade.fees(rows);
-            [isin,rows]=ismember(stock.codes,ntbPct.codes);
-            stock.closeprices=ntbPct.closeprices(rows(isin==1));
-
-            tradingPnl.neeqTradePnl=[tradingPnl.neeqTradePnl;(sum(stock.qtys.*(stock.closeprices-stock.prices))-sum(stock.fees))/capital];
-            fprintf('Info(%s): account(%s) : (%s) has dealed %f ntb stock trading records. \n',datestr(now(),0),account.ids{i},...
-                length(stock.codes));
-        else
-             tradingPnl.neeqTradePnl=[tradingPnl.neeqTradePnl;0]; 
-        end
-        
-        %期货
-        rows=strcmp(trade.accounts,account.ids{i})==1 & (strcmp(trade.types,'FU')==1 | strcmp(trade.types,'CTA')==1);
-        if sum(rows)>0
-            fu.codes=trade.codes(rows);
-            fu.qtys=trade.qtys(rows);
-            fu.prices=trade.prices(rows);
-            fu.fees=trade.fees(rows);
-            
-            [isin,rows]=ismember(fu.codes,fuPos.codes);
-            fu.closeprices=fuPos.close(rows(isin==1))';
-            fu.settleprices=fuPos.settle(rows(isin==1))';
-            fu.multipliers=fuPos.multipliers(rows(isin==1));
-
-            tradingPnl.fuTradePnlClose=[tradingPnl.fuTradePnlClose;(sum((fu.closeprices-fu.prices).*fu.qtys.*fu.multipliers)-sum(fu.fees))/capital];
-            tradingPnl.fuTradePnlSettle=[tradingPnl.fuTradePnlSettle;(sum((fu.settleprices-fu.prices).*fu.qtys.*fu.multipliers)-sum(fu.fees))/capital];
-            fprintf('Info(%s): account(%s) : has dealed %f future trading records. \n',...
-                datestr(now(),0),account.ids{i},length(fu.codes));
-        else
-            tradingPnl.fuTradePnlClose=[tradingPnl.fuTradePnlClose;0];
-            tradingPnl.fuTradePnlSettle=[tradingPnl.fuTradePnlSettle;0];
-        end
-        
-        %Bond
-        rows=strcmp(trade.accounts,account.ids{i})==1 & strcmp(trade.types,'B')==1;
-        if sum(rows)>0 && 1==bondPct.tradingStatus
-            stock.codes=trade.codes(rows);
-            stock.qtys=trade.qtys(rows);
-            stock.prices=trade.prices(rows);
-            stock.fees=trade.fees(rows);
-            [isin,rows]=ismember(stock.codes,bondPct.codes);
-            stock.closeprices=bondPct.closeprices(rows(isin==1));
-
-            tradingPnl.stockTradePnl(end)=tradingPnl.stockTradePnl(end)+(sum(stock.qtys.*(stock.closeprices-stock.prices))-sum(stock.fees))/capital;
-            fprintf('Info(%s): account(%s) : (%s) has dealed %f bond stock trading records. \n',datestr(now(),0),account.ids{i},...
-                length(stock.codes));       
-        end
-    end
-end
-
-%计算定增股票池个账户收益
-function [posPnl] = addPIPEPnl(posPnl,account,tradingPnl,s_date)
-    sqlstr=strcat('SELECT rtrim([FundAccount]),[Proportion]*(SUM(b.pnl)),[Proportion] FROM [JasperDB].[dbo].[JasperPIPEProportion] a,[JasperDB].[dbo].[JasperPrivatePlacementPosition] b ',32,...
-        'where b.Trade_dt=''',s_date,''' group by [FundAccount],[Proportion] order by [FundAccount]');
-    data=DBExcutor88(sqlstr);
-    if size(data)<0
-        fprintf('Error(%s): PIPE Total Pnl has not found in DB. \n',datestr(now(),0));  
-        return;
-    else
-        pipe.accounts=data(:,1);
-        pipe.pnlamounts=cell2mat(data(:,2)); 
-        pipe.proportions=cell2mat(data(:,3)); 
+        fundPosPnl=table;
     end  
     
-    %把底层10的收益分到master层
-    row=strcmp('10',account.ids)==1;
-    if sum(row) > 0 
-        capital=account.capitals(row);    
-        pnlamount=capital*(posPnl.stockPosPnl(row)+posPnl.hkPosPnl(row)+posPnl.neeqPosPnl(row)+posPnl.fuPosPnlSettle(row)+tradingPnl.stockTradePnl(row)+tradingPnl.hkTradePnl(row)+tradingPnl.neeqTradePnl(row)+tradingPnl.fuTradePnlSettle(row));    
-        posPnl.stockPosPnl(row)=posPnl.stockPosPnl(row)+sum(pipe.pnlamounts)/capital;
+    if ~isempty(option)
+        fprintf('Info(%s):calPositionPnl-Deal option Records! \n',datestr(now(),0));
+        checkRecords(option, optionPct);    
+        option=join(option,optionPct,'Keys','symbol');    
+        fprintf('Info(%s):calPositionPnl-cal A share pnl! \n',datestr(now(),0));    
+        option.posPnl=option.change_price.*option.volume_option.*option.multiplier; 
+        optionPosPnl=varfun(@sum,option,'InputVariables','posPnl','GroupingVariables','account');
+        optionPosPnl.GroupCount=[];
+        optionPosPnl.Properties.VariableNames={'Account','OptionPosPnl'};
     else
-        pnlamount=0;
+        optionPosPnl=table;
     end
-    pipe.pnlamounts=pipe.pnlamounts+pnlamount*pipe.proportions;
-    [isin,rows]=ismember(posPnl.accounts,pipe.accounts);    
-    posPnl.stockPosPnl(isin==1)=posPnl.stockPosPnl(isin==1)+pipe.pnlamounts(rows(isin==1))./account.capitals(isin==1);
+    
+    % deal with the pos fee of HK account
+    if ~isempty(stock(strcmp(stock.account,'86')==1,:)) || ~isempty(stock(strcmp(stock.account,'88')==1,:))
+        fprintf('Info(%s):calPositionPnl-cal hk account special fee(stock)! \n',datestr(now(),0));
+        tmp_pos=stock((strcmp(stock.account,'86')==1) | (strcmp(stock.account,'88')==1),:);    
+        tmp_pos.SpecialFee=zeros(size(tmp_pos,1),1);
+        tmp_pos.SpecialFee=abs(tmp_pos.close.*tmp_pos.volume_stock*(liusd(1)/100+0.009)/365*dateDiff);
+        stockSpecialFee=varfun(@sum,tmp_pos,'InputVariables','SpecialFee','GroupingVariables','account');
+        stockSpecialFee.GroupCount=[];
+        stockSpecialFee.Properties.VariableNames={'Account','stockSpecialFee'};
+    else
+        stockSpecialFee=table([],[],'VariableNames',{'Account','stockSpecialFee'});
+    end
+
+    if ~isempty(fund(strcmp(fund.account,'86')==1,:)) || ~isempty(fund(strcmp(fund.account,'88')==1,:))
+        fprintf('Info(%s):calPositionPnl-cal hk account special fee(fund)! \n',datestr(now(),0));
+        tmp_pos=fund((strcmp(fund.account,'86')==1) | (strcmp(fund.account,'88')==1),:);
+        tmp_pos.SpecialFee=zeros(size(tmp_pos,1),1);
+        tmp_pos.SpecialFee=abs(tmp_pos.close.*tmp_pos.volume_fund*(0.045-liusd(2)/100)/365*dateDiff);
+        fundSpecialFee=varfun(@sum,tmp_pos,'InputVariables','SpecialFee','GroupingVariables','account');
+        fundSpecialFee.GroupCount=[];
+        fundSpecialFee.Properties.VariableNames={'Account','fundSpecialFee'};
+    else
+        fundSpecialFee=table([],[],'VariableNames',{'Account','fundSpecialFee'});
+    end
+
+    % deal with the forex pnl
+    if ~isempty(stock(strcmp(stock.account,'88')==1,:))
+        fprintf('Info(%s):calPositionPnl-cal hk account forex pnl! \n',datestr(now(),0));
+        posLongMV88=sum(stock.close(strcmp(stock.account,'88')==1).*stock.volume_stock(strcmp(stock.account,'88')==1));
+        posShortMV88=sum(fund.close(strcmp(fund.account,'88')==1).*fund.volume_fund(strcmp(fund.account,'88')==1));
+        forexPnl=-(posLongMV88+posShortMV88)*cusf;
+        stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)=stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)+forexPnl;
+    end
+
+    specialFee=outerjoin(stockSpecialFee,fundSpecialFee,'MergeKeys',true);
+    specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee;
+    specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
+    specialFee.stockSpecialFee=[];
+    specialFee.fundSpecialFee=[];    
+else
+    stockPosPnl=table;
+    futurePosPnlClose=table;
+    futurePosPnlSettle=table;
+    fundPosPnl=table;
+    optionPosPnl=table;
+    specialFee=table;
+end
+
+if Utilities.isTradingDates(s_date, 'HK') 
+    fprintf('Info(%s):calPositionPnl-cal HK share pnl! \n',datestr(now(),0));
+    hkstock=pos(strcmp(pos.type,'HKS')==1,:);
+    checkRecords(hkstock, hkPct);
+    hkstock=join(hkstock,hkPct,'Keys','symbol');
+    hkstock.posPnl=hkstock.change_price.*hkstock.volume_hkstock*forexPct.close(strcmp(forexPct.symbol,'HKDCNY.EX')==1);
+    hkstockPosPnl=varfun(@sum,hkstock,'InputVariables','posPnl','GroupingVariables','account');
+    hkstockPosPnl.GroupCount=[];
+    hkstockPosPnl.Properties.VariableNames={'Account','HKPosPnl'}; 
+else
+    hkstockPosPnl=table;
+end
+
+ % merge
+fprintf('Info(%s):calPositionPnl-merge A share classification detail into ONE table! \n',datestr(now(),0));
+if ~isempty(stockPosPnl)
+    posPnl=stockPosPnl;
+    if ~isempty(hkstockPosPnl)
+        posPnl=outerjoin(posPnl,hkstockPosPnl,'MergeKeys',true); 
+    end
+else
+    if ~isempty(hkstockPosPnl)
+        posPnl=hkstockPosPnl;
+    end
+end
+if ~isempty(futurePosPnlClose)
+    posPnl=outerjoin(posPnl,futurePosPnlClose,'MergeKeys',true);  
+end
+if ~isempty(futurePosPnlSettle)
+    posPnl=outerjoin(posPnl,futurePosPnlSettle,'MergeKeys',true);
+end
+if ~isempty(fundPosPnl)
+    posPnl=outerjoin(posPnl,fundPosPnl,'MergeKeys',true);
+end
+if ~isempty(optionPosPnl)
+    posPnl=outerjoin(posPnl,optionPosPnl,'MergeKeys',true);
+end
+if ~isempty(specialFee)
+    posPnl=outerjoin(posPnl,specialFee,'MergeKeys',true);    
+else
+    posPnl.SpecialFee=zeros(size(posPnl,1),1);
+end 
+posPnl=fillmissing(posPnl,'constant',0,'DataVariables',@isnumeric);
+% [isin,~]=ismember('StockPosPnl',posPnl.Properties.VariableNames);
+if contains('StockPosPnl',posPnl.Properties.VariableNames)
+    posPnl.StockPosPnl=posPnl.StockPosPnl-posPnl.SpecialFee;
+end
+% cal pnl(bps)
+fprintf('Info(%s):calPositionPnl-cal pnl(bps), divide capital! \n',datestr(now(),0));
+tmpT=unique(account(:,{'id','capital'}));
+posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
+tmpPnl=varfun(@(x) x./posPnl.capital*10000,posPnl,'InputVariables',posPnl.Properties.VariableNames(2:end-1));
+tmpPnl.Properties.VariableNames=posPnl.Properties.VariableNames(2:end-1);
+posPnl=[posPnl(:,1),tmpPnl];
+end
+
+%----------------------------------------------------------------%
+%计算trading pnl
+function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct)
+fprintf('Info(%s):calTradingPnl-getMultiplier! \n',datestr(now(),0));
+tmp_t=rowfun(@getMultiplier,trade,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
+trade=[trade tmp_t];
+
+stock=trade(strcmp(trade.type,'S')==1,:);
+hkstock=trade(strcmp(trade.type,'HKS')==1,:);
+future=trade(strcmp(trade.type,'FU')==1,:);
+fund=trade(strcmp(trade.type,'F')==1,:);
+option=trade(strcmp(trade.type,'Option')==1,:);
+
+defaultFee=0.001;
+    function [fee]=calFee(price, vol)
+        if vol<0
+            fee=abs(price*vol*defaultFee);
+        else
+            fee=0;
+        end
+    end
+
+if ~isempty(stock)
+    fprintf('Info(%s):calTradingPnl-deal stock records! \n',datestr(now(),0));
+    checkRecords(stock, stockPct);
+    stock=join(stock,stockPct,'Keys','symbol');
+    stock.StockTradePnl=(stock.close-stock.price).*stock.volume_stock;
+    stockFee=account(strcmp(account.sec_type,'STOCK')==1,{'id','commission','min_commission'});
+    stockFee.Properties.VariableNames('commission')={'commission_rate'};
+    stock=join(stock,stockFee,'LeftKeys','account','RightKeys','id');
+    stock.commission=stock.price.*abs(stock.volume_stock).*stock.commission_rate;
+    stock.commission=rowfun(@(x,y) max(x,y),stock,'InputVariables',{'commission','min_commission'},'OutputFormat','uniform');
+    stock.fee=rowfun(@calFee,stock,'InputVariables',{'price','volume_stock'},'OutputFormat','uniform');
+    stock.StockTradePnl=stock.StockTradePnl-stock.commission-stock.fee;
+    stockTradePnl=varfun(@sum,stock,'InputVariables',{'StockTradePnl'},'GroupingVariables','account');
+    stockTradePnl.GroupCount=[];  
+    stockTradePnl.Properties.VariableNames={'Account','StockTradePnl'}; 
+    stockFeePnl=varfun(@sum,stock,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    stockTradePnl=table([],[],'VariableNames',{'Account','StockTradePnl'});
+end
+
+if ~isempty(hkstock)
+    fprintf('Info(%s):calTradingPnl-deal hk stock records! \n',datestr(now(),0));
+    checkRecords(hkstock, hkPct);
+    hkstock=join(hkstock,hkPct,'Keys','symbol');
+    hkstock.HKTradePnl=(hkstock.close-hkstock.price).*hkstock.volume_hkstock*forexPct.close(strcmp(forexPct.symbol,'HKDCNY.EX')==1);
+    hkstock=join(hkstock,stockFee,'LeftKeys','account','RightKeys','id');
+    hkstock.commission=hkstock.price.*abs(hkstock.volume_hkstock).*hkstock.commission_rate*forexPct.close(strcmp(forexPct.symbol,'HKDCNY.EX')==1);
+    hkstock.commission=rowfun(@(x,y) max(x,y),hkstock,'InputVariables',{'commission','min_commission'},'OutputFormat','uniform');
+    hkstock.fee=rowfun(@calFee,hkstock,'InputVariables',{'price','volume_hkstock'},'OutputFormat','uniform');
+    hkstock.HKTradePnl=hkstock.HKTradePnl-hkstock.commission-hkstock.fee;
+    hkstockTradePnl=varfun(@sum,hkstock,'InputVariables',{'HKTradePnl'},'GroupingVariables','account');
+    hkstockTradePnl.GroupCount=[];
+    hkstockTradePnl.Properties.VariableNames={'Account','HKTradePnl'};
+    hkstockFeePnl=varfun(@sum,hkstock,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    hkstockTradePnl=table([],[],'VariableNames',{'Account','HKTradePnl'});
+end
+
+if ~isempty(future)
+    fprintf('Info(%s):calTradingPnl-deal future records! \n',datestr(now(),0));
+    checkRecords(future, fuPct);
+    future=join(future,fuPct,'Keys','symbol');
+    future.FuTradePnlClose=(future.close-future.price).*future.volume_future.*future.multiplier;
+    future.FuTradePnlSettle=(future.settle-future.price).*future.volume_future.*future.multiplier;
+    futureFee=account(strcmp(account.sec_type,'FUTURE')==1,{'id','commission','min_commission'});
+    futureFee.Properties.VariableNames('commission')={'commission_rate'};
+    future=join(future,futureFee,'LeftKeys','account','RightKeys','id');
+    future.commission=future.price.*abs(future.volume_future).*future.commission_rate.*future.multiplier + future.min_commission;
+    future.fee=zeros(size(future,1),1);
+    future.FuTradePnlClose=future.FuTradePnlClose-future.commission-future.fee;
+    future.FuTradePnlSettle=future.FuTradePnlSettle-future.commission-future.fee;
+    futureTradePnlClose=varfun(@sum,future,'InputVariables',{'FuTradePnlClose'},'GroupingVariables','account');
+    futureTradePnlSettle=varfun(@sum,future,'InputVariables',{'FuTradePnlSettle'},'GroupingVariables','account');
+    futureTradePnlClose.GroupCount=[];
+    futureTradePnlSettle.GroupCount=[]; 
+    futureTradePnlClose.Properties.VariableNames={'Account','FuTradePnlClose'}; 
+    futureTradePnlSettle.Properties.VariableNames={'Account','FuTradePnlSettle'};
+    futureFeePnl=varfun(@sum,future,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    futureTradePnlClose=table([],[],'VariableNames',{'Account','FuTradePnlClose'});
+    futureTradePnlSettle=table([],[],'VariableNames',{'Account','FuTradePnlSettle'});
+end
+
+if ~isempty(fund)
+    fprintf('Info(%s):calTradingPnl-deal fund records! \n',datestr(now(),0));
+    checkRecords(fund, fundPct);
+    fund=join(fund,fundPct,'Keys','symbol');
+    fund.FundTradePnl=(fund.close-fund.price).*fund.volume_fund;
+    fund=join(fund,stockFee,'LeftKeys','account','RightKeys','id');
+    fund.commission=fund.price.*abs(fund.volume_fund).*fund.commission_rate;
+    fund.commission=rowfun(@(x,y) max(x,y),fund,'InputVariables',{'commission','min_commission'},'OutputFormat','uniform');
+    fund.fee=zeros(size(fund,1),1); % 暂时不计算fund的佣金
+    fund.FundTradePnl=fund.FundTradePnl-fund.commission-fund.fee;
+    fundTradePnl=varfun(@sum,fund,'InputVariables',{'FundTradePnl'},'GroupingVariables','account');
+    fundTradePnl.GroupCount=[];
+    fundTradePnl.Properties.VariableNames={'Account','FundTradePnl'}; 
+    fundFeePnl=varfun(@sum,fund,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    fundTradePnl=table([],[],'VariableNames',{'Account','FundTradePnl'});
+end
+
+    function optionCom=calOptCom(vol, octag, commission_rate)
+        if (vol<0) && (strcmp(octag,'open')==1)
+            optionCom=0;
+        else
+            optionCom=abs(vol*commission_rate);
+        end
+    end
+if ~isempty(option)
+    fprintf('Info(%s):calTradingPnl-deal option records! \n',datestr(now(),0));
+    checkRecords(option, optionPct);
+    option=join(option,optionPct,'Keys','symbol');
+    option.OptionTradePnl=(option.close-option.price).*option.volume_option.*option.multiplier;
+    optionFee=account(strcmp(account.sec_type,'OPTION')==1,{'id','commission','min_commission'});
+    optionFee.Properties.VariableNames('commission')={'commission_rate'};
+    option=join(option,optionFee,'LeftKeys','account','RightKeys','id');    
+    option.commission=rowfun(@calOptCom,option,'InputVariables',{'volume_option','tag','commission_rate'},'OutputFormat','uniform');
+    option.fee=zeros(size(option,1),1); % 暂时不计算fund的佣金
+    option.OptionTradePnl=option.OptionTradePnl-option.commission-option.fee;
+    optionTradePnl=varfun(@sum,option,'InputVariables',{'OptionTradePnl'},'GroupingVariables','account');
+    optionTradePnl.GroupCount=[];
+    optionTradePnl.Properties.VariableNames={'Account','OptionTradePnl'}; 
+    optionFeePnl=varfun(@sum,option,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    optionTradePnl=table([],[],'VariableNames',{'Account','OptionTradePnl'});
+end
+
+% 根据账号汇总
+fprintf('Info(%s):calTradingPnl-sum pnl! \n',datestr(now(),0));
+tradePnl=stockTradePnl;
+if ~isempty(hkstockTradePnl)
+    tradePnl=outerjoin(tradePnl,hkstockTradePnl,'MergeKeys',true); 
+end
+if ~isempty(futureTradePnlClose)
+    tradePnl=outerjoin(tradePnl,futureTradePnlClose,'MergeKeys',true);   
+    tradePnl=outerjoin(tradePnl,futureTradePnlSettle,'MergeKeys',true);  
+end
+if ~isempty(fundTradePnl)
+    tradePnl=outerjoin(tradePnl,fundTradePnl,'MergeKeys',true); 
+end
+if ~isempty(optionTradePnl)
+    tradePnl=outerjoin(tradePnl,optionTradePnl,'MergeKeys',true); 
+end
+tradePnl=fillmissing(tradePnl,'constant',0,'DataVariables',@isnumeric); 
+
+% cal pnl(bps)
+fprintf('Info(%s):calTradingPnl-cal pnl(bps), divide capital! \n',datestr(now(),0));
+tmpT=unique(account(:,{'id','capital'}));
+tradePnl=join(tradePnl,tmpT,'LeftKeys','Account','RightKeys','id');
+tmpPnl=varfun(@(x) x./tradePnl.capital*10000,tradePnl,'InputVariables',tradePnl.Properties.VariableNames(2:end-1));
+tmpPnl.Properties.VariableNames=tradePnl.Properties.VariableNames(2:end-1);
+tradePnl=[tradePnl(:,1),tmpPnl];
 end
 
 function [liusd, cusf] = getExtenalMarketInfo(tdate,tydate, w)    
