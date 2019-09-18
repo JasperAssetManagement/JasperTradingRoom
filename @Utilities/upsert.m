@@ -159,6 +159,9 @@ fetchWhereClause = sprintf(' %s AND', inClauses{:});
 fetchSqlStr = sprintf('SELECT %s FROM %s WHERE %s', keyFieldsListStr(1:end-1), tableName, fetchWhereClause(1:end-3));
 if doPrint, fprintf('Fetching %s data in %s matching given data...', keyFieldsListStr(1:end-1), tableName), end
 fetchedData = fetch(conn, fetchSqlStr);
+if istable(fetchedData)
+    fetchedData=table2cell(fetchedData);
+end
 if doPrint, fprintf(' done. (%d potential matches found)\n', size(fetchedData,1)), end
 
 % Build a map of which rows to be upserted already exist in the table.
