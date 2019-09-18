@@ -2,8 +2,8 @@ function copyLiquidFiles()
 %收盘后拷贝持仓，成交，权益文件
 
 %需要按日期拷贝的文件夹
-roots=[{'E:\交易文档\temp'},{'E:\交易文档\temp\deal'},{'E:\交易文档\temp\tradingDetail'},{'V:\Neo\收盘数据\每日成交明细'}]; %,{'V:\Neo\收盘数据\每日成交'}
-targets=[{'V:\Neo\收盘数据\收盘仓位'},{'V:\Neo\收盘数据\每日成交'},{'V:\每日成交单明细'},{'V:\每日成交单明细'}];%,{'V:\每日成交单'}
+roots=[{'\\192.168.1.88\Trading Share\Neo\收盘数据\每日成交明细'}]; %,{'V:\Neo\收盘数据\每日成交'}
+targets=[{'\\192.168.1.88\Trading Share\每日成交单明细'}];%,{'V:\每日成交单'}
 for i=1:length(roots)
     fileroot=roots{i};
     if ~strcmp(fileroot(end),'\')
@@ -22,9 +22,8 @@ for i=1:length(roots)
 end
 
 %可一次性拷贝的文件夹
-copyfile('E:\交易文档\temp\future','V:\Neo\收盘数据\期货权益');
-copyfile('V:\Neo\收盘数据\期货权益','V:\DailyFutureDetail');
-copyfile('V:\Neo\收盘数据\收盘仓位','V:\产品持仓');
+copyfile('\\192.168.1.88\Trading Share\Neo\收盘数据\期货权益','\\192.168.1.88\Trading Share\DailyFutureDetail');
+copyfile('\\192.168.1.88\Trading Share\Neo\收盘数据\收盘仓位','\\192.168.1.88\Trading Share\产品持仓');
 
  
 end

@@ -3,8 +3,9 @@ classdef JasperTradingRoom < handle
     properties 
         classdir
         db88conn %88 db connection
-        db85conn %85 db connection 
+        dbWindconn %85 db connection 
         db90conn %85 db connection 
+        pg195conn
     end 
     
     methods
@@ -16,16 +17,16 @@ classdef JasperTradingRoom < handle
             close(obj.db88conn);
             dbase='JasperDB';
             ip='192.168.1.88';
-            user='sa';
-            password='123.qwer';
+            user='TraderOnly';
+            password='112358.qwe';
             url=['jdbc:sqlserver://',ip,';database=',dbase];
             driver='com.microsoft.sqlserver.jdbc.SQLServerDriver';
             conn = database(dbase,user,password,driver,url);
             obj.db88conn = conn;
         end
         
-        function conn = get.db85conn(obj) % aliyun db connection
-            close(obj.db85conn);
+        function conn = get.dbWindconn(obj) % aliyun db connection
+            close(obj.dbWindconn);
             dbase='windfilesync';
             ip='jasperam.sqlserver.rds.aliyuncs.com:3433';
             user='IRUser';
@@ -33,7 +34,19 @@ classdef JasperTradingRoom < handle
             url=['jdbc:sqlserver://',ip,';database=',dbase];
             driver='com.microsoft.sqlserver.jdbc.SQLServerDriver';
             conn = database(dbase,user,password,driver,url);
-            obj.db85conn = conn;
+            obj.dbWindconn = conn;
+        end
+        
+        function conn = get.pg195conn(obj) % 90 db connection
+            close(obj.pg195conn);
+            dbase='attribution';
+            ip='postgres195.inner.jasperam.com:5433';
+            user='jttrade';
+            password='jttrade123';
+            url=['jdbc:postgresql://',ip,'/'];
+            driver='org.postgresql.Driver';
+            conn = database(dbase,user,password,driver,url);
+            obj.pg195conn = conn;
         end
         
         function conn = get.db90conn(obj) % 90 db connection
@@ -48,31 +61,27 @@ classdef JasperTradingRoom < handle
             obj.db90conn = conn;
         end
         
-        function cAccList = getaccounts(obj, date)           
-            %date=Utilities.tradingdate(today(),-1,'outputStyle','yyyymmdd');               
-
-            conn = obj.db88conn;
-            sqlstr = ['SELECT a.[s_key],a.[s_value],rtrim(a.[model]),a.[tradingSystem],a.[trader],isnull(b.TotalAsset,0) FROM [JasperDB].[dbo].[Dictionary] a left join [JasperDB].dbo.AccountDetail b' ...
-                ' on s_status=''running'' and a.root_account=b.Account and b.Trade_dt=''' date ''';'];
-            
-            rowdata = Utilities.getsqlrtn(conn,sqlstr); 
-            cAccList.ids=rowdata(:,1);
-            cAccList.names=rowdata(:,2);
-            cAccList.models=rowdata(:,3);
-            cAccList.systems=rowdata(:,4);
-            cAccList.traders=rowdata(:,5);
-            cAccList.assets=cell2mat(rowdata(:,6));    
-            %取出持仓市值
-            conn = obj.db88conn;
-            sqlstr = ['SELECT [Account],sum([MarketValue]) FROM [JasperDB].[dbo].[JasperPosition] where Trade_dt=''' date ''' and Type=''S'' group by Account;'];            
-            rowdata = Utilities.getsqlrtn(conn,sqlstr);
-            [isin,rows] = ismember(cAccList.ids,rowdata(:,1));
-            cAccList.AShareAmounts=zeros(length(isin),1);
-            for i=1:length(isin)
-                if isin(i)
-                    cAccList.AShareAmounts(i)=cell2mat(rowdata(rows(i),2));           
+        function cAccT = getaccounts(obj, date, newAccT)                     
+            conn=obj.pg195conn;
+            sqlstr=['SELECT distinct on (product_id, sec_type) product_id,product_name,trader,commission,sec_type,institution,min_commission,root_product_id ', ...
+                        'FROM "public"."product" order by product_id,sec_type,update_time desc'];
+            rowdata=Utilities.getsqlrtn(conn,sqlstr); 
+            cAccT=cell2table(rowdata,'VariableNames',{'id','account_name','trader','commission','sec_type','institution','min_commission','root_account'});
+            % get total capital
+            conn=obj.db88conn;
+            sqlstr=['SELECT [Account],isnull(TotalAsset,0) FROM [JasperDB].[dbo].[AccountDetail] where Trade_dt=''' date ''';'];
+            rowdata=Utilities.getsqlrtn(conn,sqlstr);
+            capT=cell2table(rowdata,'VariableNames',{'id','capital'});
+            if ~isempty(newAccT)
+                [ia,l]=ismember(newAccT.id,capT.id);
+                if sum(ia==1)>0
+                    capT.capital(l(ia==1))=capT.capital(l(ia==1))+newAccT.capital(ia==1);
+                end
+                if sum(ia==0)>0
+                    capT=[capT;newAccT(ia==0,:)];
                 end
             end
+            cAccT=innerjoin(cAccT,capT,'LeftKeys','root_account','RightKeys','id');           
         end
         
         function cAccList = getzfaccounts(obj,date)    
