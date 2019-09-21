@@ -21,7 +21,7 @@ sql=['select WindCode,(3-2*side)*Qty as qty,Type FROM [JasperDB].[dbo].[JasperPo
 tpos=Utilities.getsqlrtn(conn,sql);
 posflag=false;
 if ~isempty(tpos)
-    tpos=cell2table(tpos,'VariableNames',{'windcode','name','qty','type'});    
+    tpos=cell2table(tpos,'VariableNames',{'windcode','qty','type'});    
     posflag=true;
 end
 %1.1 ȡTrading
@@ -57,7 +57,7 @@ tpos.side(tpos.qty<0)={2};
 tpos.qty(tpos.qty<0)=-tpos.qty(tpos.qty<0); 
 % codes=unique(tpos.windcode);
 % names=w.wss(codes,'sec_name');
-% tpos.name=cellfun(@(x) names(strcmp(x,codes)==1),tpos.windcode);
+tpos.name=tpos.windcode;
 tpos.marketvalue=repmat({0},size(tpos,1),1);
 tpos.adjustfactor=repmat({1},size(tpos,1),1);
 tpos.typedetail=tpos.type;
