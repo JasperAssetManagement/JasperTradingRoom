@@ -86,6 +86,21 @@ if ~isempty(mergeAccount)
     end
 end
 
+%计算申购公司产品的产品, type=OTC
+otcpos=pos(strcmp(pos.type,'OTC')==1,:);
+if ~isempty(otcpos)
+    conn=jtr.db88conn;
+    sql='select Account, Windcode from [dbo].[OTCMap];';
+    otcmap=Utilities.getsqlrtn(conn,sql);
+    [isin,rows]=ismember(otcmap.Account,posPnl.Account);
+    fprintf('Error(%s): Main-(%s) is not is otc map. \n',datestr(now(),0),join(otcmap{isin==0,'Windcode'}));
+    otcpct=posPnl(rows(isin==1),{'Account','TotalReturn'});
+    otcpct=join(otcpct,otcmap,'MergeKeys',True);
+    otcpct.Properties.VariableNames('TotalReturn')={'change_price'};
+    posPnl=calOTCPnl(account,otcpos,otcpct,posPnl);
+end
+
+posPnl.capital=[];
 if 1==f_updateDB        
     conn=jtr.db88conn;
     res = upsert(conn,'JasperDB.dbo.AccountDetail',posPnl.Properties.VariableNames,{'Trade_dt','Account'},table2cell(posPnl));     
@@ -297,7 +312,7 @@ if Utilities.isTradingDates(s_date, 'HK')
     hkstock=pos(strcmp(pos.type,'HKS')==1,:);
     checkRecords(hkstock, hkPct);
     hkstock=join(hkstock,hkPct,'Keys','symbol');
-    hkstock.posPnl=hkstock.change_price.*hkstock.volume_hkstock*forexPct.close(strcmp(forexPct.symbol,'HKDCNY.EX')==1);
+    hkstock.posPnl=hkstock.change_price.*hkstock.volume_hkstock*forexPct.close(cellfun(@(x) contains(x,'HKDCNY'),forexPct.symbol));
     hkstockPosPnl=varfun(@sum,hkstock,'InputVariables','posPnl','GroupingVariables','account');
     hkstockPosPnl.GroupCount=[];
     hkstockPosPnl.Properties.VariableNames={'Account','HKPosPnl'}; 
@@ -345,7 +360,7 @@ tmpT=unique(account(:,{'id','capital'}));
 posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
 tmpPnl=varfun(@(x) x./posPnl.capital*10000,posPnl,'InputVariables',posPnl.Properties.VariableNames(2:end-1));
 tmpPnl.Properties.VariableNames=posPnl.Properties.VariableNames(2:end-1);
-posPnl=[posPnl(:,1),tmpPnl];
+posPnl=[posPnl(:,1),tmpPnl,posPnl.capital];
 end
 
 %----------------------------------------------------------------%
@@ -502,6 +517,24 @@ tradePnl=join(tradePnl,tmpT,'LeftKeys','Account','RightKeys','id');
 tmpPnl=varfun(@(x) x./tradePnl.capital*10000,tradePnl,'InputVariables',tradePnl.Properties.VariableNames(2:end-1));
 tmpPnl.Properties.VariableNames=tradePnl.Properties.VariableNames(2:end-1);
 tradePnl=[tradePnl(:,1),tmpPnl];
+end
+
+%----------------------------------------------------------------%
+function [posPnl]=calOTCPnl(account,pos,otcmap,posPnl)
+fprintf('Info(%s):calOTCPnl-deal otc records! \n',datestr(now(),0));
+pos=join(pos,otcmap,'MergeKeys',true);
+pos.posPnl=pos.change_price.*pos.volume; 
+OTCPosPnl=varfun(@sum,pos,'InputVariables','posPnl','GroupingVariables','Account');    
+OTCPosPnl.GroupCount=[];    
+OTCPosPnl.Properties.VariableNames={'Account','OTCPosPnl'};
+posPnl=outerjoin(posPnl,OTCPosPnl,'MergeKeys',true);
+posPnl=fillmissing(posPnl,'constant',0,'DataVariables',@isnumeric);
+% cal pnl(bps)
+fprintf('Info(%s):calOTCPnl-add pnl(bps) 2 total Pnl, divide capital! \n',datestr(now(),0));
+tmpT=unique(account(:,{'id','capital'}));
+posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
+posPnl.OTCPosPnl=posPnl.OTCPosPnl./posPnl.capital;
+posPnl.TotalReturn=posPnl.TotalReturn+posPnl.OTCPosPnl;
 end
 
 function [liusd, cusf] = getExtenalMarketInfo(tdate,tydate, w)    
