@@ -100,7 +100,6 @@ if ~isempty(otcpos)
     posPnl=calOTCPnl(account,otcpos,otcpct,posPnl);
 end
 
-posPnl.capital=[];
 if 1==f_updateDB        
     conn=jtr.db88conn;
     res = upsert(conn,'JasperDB.dbo.AccountDetail',posPnl.Properties.VariableNames,{'Trade_dt','Account'},table2cell(posPnl));     
@@ -360,7 +359,7 @@ tmpT=unique(account(:,{'id','capital'}));
 posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
 tmpPnl=varfun(@(x) x./posPnl.capital*10000,posPnl,'InputVariables',posPnl.Properties.VariableNames(2:end-1));
 tmpPnl.Properties.VariableNames=posPnl.Properties.VariableNames(2:end-1);
-posPnl=[posPnl(:,1),tmpPnl,posPnl.capital];
+posPnl=[posPnl(:,1),tmpPnl];
 end
 
 %----------------------------------------------------------------%
