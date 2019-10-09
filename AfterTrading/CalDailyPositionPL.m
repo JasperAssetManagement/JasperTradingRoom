@@ -1,16 +1,13 @@
 function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,w)
 %% calculate the position pnl
 jtr = JasperTradingRoom;
-if 0==f_calHKDiffDay
-    s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyyymmdd');
-else
-    s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),-1,'market','HK','outputStyle','yyyymmdd');
-end
+s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyyymmdd');
+
 %获取香港的最近T,T-1交易日
 % hks_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 % hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 
-excludedPosList={'IH1908.CFE'};
+excludedPosList={''};
 
 %导入收盘后数据    
 [pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
