@@ -64,7 +64,7 @@ classdef JasperTradingRoom < handle
         function cAccT = getaccounts(obj, date, newAccT)                     
             conn=obj.pg195conn;
             sqlstr=['SELECT distinct on (product_id, sec_type) product_id,product_name,trader,commission,sec_type,institution,min_commission,root_product_id ', ...
-                        'FROM "public"."product" order by product_id,sec_type,update_time desc'];
+                        'FROM "public"."product" where status=''''running'''' order by product_id,sec_type,update_time desc'];
             rowdata=Utilities.getsqlrtn(conn,sqlstr); 
             cAccT=cell2table(rowdata,'VariableNames',{'id','account_name','trader','commission','sec_type','institution','min_commission','root_account'});
             % get total capital
