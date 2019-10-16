@@ -407,7 +407,7 @@ if ~isempty(hkstock)
     hkstock=join(hkstock,hkPct,'Keys','symbol');
     hkstock.HKTradePnl=(hkstock.close-hkstock.price).*hkstock.volume_hkstock*forexPct.close(cellfun(@(x) contains(x,'HKDCNY'),forexPct.symbol));
     hkstock=join(hkstock,stockFee,'LeftKeys','account','RightKeys','id');
-    hkstock.commission=hkstock.price.*abs(hkstock.volume_hkstock).*hkstock.commission_rate*forexPct.close(strcmp(forexPct.symbol,'HKDCNY.EX')==1);
+    hkstock.commission=hkstock.price.*abs(hkstock.volume_hkstock).*hkstock.commission_rate*forexPct.close(cellfun(@(x) contains(x,'HKDCNY'),forexPct.symbol));
     hkstock.commission=rowfun(@(x,y) max(x,y),hkstock,'InputVariables',{'commission','min_commission'},'OutputFormat','uniform');
     hkstock.fee=rowfun(@calFee,hkstock,'InputVariables',{'price','volume_hkstock'},'OutputFormat','uniform');
     hkstock.HKTradePnl=hkstock.HKTradePnl-hkstock.commission-hkstock.fee;
