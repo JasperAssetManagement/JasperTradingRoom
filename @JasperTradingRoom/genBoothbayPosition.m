@@ -55,9 +55,9 @@ tpos.account=repmat({accId},size(tpos,1),1);
 tpos.side=repmat({1},size(tpos,1),1);
 tpos.side(tpos.qty<0)={2};
 tpos.qty(tpos.qty<0)=-tpos.qty(tpos.qty<0); 
-codes=unique(tpos.windcode);
-names=w.wss(codes,'sec_name');
-tpos.name=cellfun(@(x) names(strcmp(x,codes)==1),tpos.windcode);
+% codes=unique(tpos.windcode);
+% names=w.wss(codes,'sec_name');
+tpos.name=tpos.windcode;
 tpos.marketvalue=repmat({0},size(tpos,1),1);
 tpos.adjustfactor=repmat({1},size(tpos,1),1);
 tpos.typedetail=tpos.type;
@@ -67,6 +67,6 @@ tpos.dzqty=repmat({0},size(tpos,1),1);
 
 conn=jtr.db88conn;
 res=Utilities.upsert(conn,'JasperDB.dbo.JasperPosition',tpos.Properties.VariableNames,[1 0 0 1 1 1 0 0 0 1 0],table2cell(tpos));
-fprintf('upsert JasperPosition(from yestPos&jasperTrade):insert %d,update %d \n',sum(res==1),sum(res==0)); 
+fprintf('Info(%s):upsert %s position(%s):insert %d,update %d \n',datestr(now(),0),date,accId,sum(res==1),sum(res==0)); 
 w.close;
 end
