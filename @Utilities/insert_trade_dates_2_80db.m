@@ -4,7 +4,7 @@ function insert_trade_dates_2_80db()
     end
     %Ğ´ÈëÊı¾İ¿â
     jtr=JasperTradingRoom;
-    conn=jtr.db80pgconn;
+    conn=jtr.pg195conn;
     firstDate=min([TradingDates.SZ(1),TradingDates.HK(1),TradingDates.NY(1)]);
     lastDate=max([TradingDates.SZ(end),TradingDates.HK(end),TradingDates.NY(end)]);
 
@@ -37,6 +37,6 @@ function insert_trade_dates_2_80db()
         end
         inputData=[inputData; tpd];
     end
-    res = Utilities.upsert(conn,'jtder.public.trade_dates',{'trade_dt','sz','sh','hk','ny'},{'trade_dt'},inputData); 
+    res = Utilities.upsert(conn,'attribution.public.trade_dates',{'trade_dt','sz','sh','hk','ny'},{'trade_dt'},inputData); 
     fprintf('insert %d,update %d \n',sum(res==1),sum(res==0));
 end
