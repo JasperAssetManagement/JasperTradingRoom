@@ -9,7 +9,7 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
 
 %导入收盘后数据    
 [pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
-[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date); %bondPct,ctaPct,
+[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date,s_ydate); %bondPct,ctaPct,
 
     
 if 0==f_calHKDiffDay
@@ -110,7 +110,7 @@ function [pos,trade] = getDBInfo(s_date,s_ydate,jtr)
     [trade]=getTradeInfo(s_date,jtr);
 end
 
-function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date) %bondPct,ctaPct,
+function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
     root_path='\\192.168.1.88\Trading Share\daily_quote\';
     if Utilities.isTradingDates(s_date, 'HK') 
         hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
@@ -125,7 +125,7 @@ function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaI
     %     ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
         forexPct=readtable([root_path 'forex_' s_date '.csv']);
         optionPct=readtable([root_path 'option_' s_date '.csv']);
-        sc_member=readtable(['\\192.168.1.135\prod\research\avail_short\shsz_sc_members\' s_date '.shsz_sc_members.csv']);
+        sc_member=readtable(['\\192.168.1.135\prod\research\avail_short\shsz_sc_members\' s_ydate '.shsz_sc_members.csv']);
     else
         stockPct=table;
         fundPct=table;
