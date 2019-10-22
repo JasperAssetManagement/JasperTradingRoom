@@ -7,8 +7,11 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
 % hks_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 % hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 
+<<<<<<< HEAD
 % excludedPosList={};
 
+=======
+>>>>>>> a6a935774a6e43fcf9bca0c3f7a34ff1fe3dab44
 %导入收盘后数据    
 [pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
 [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date); %bondPct,ctaPct,
