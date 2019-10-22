@@ -1,4 +1,4 @@
-function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,w)
+function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,w,excludedPosList)
 %% calculate the position pnl
 jtr = JasperTradingRoom;
 s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyyymmdd');
@@ -7,11 +7,11 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
 % hks_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 % hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 
-excludedPosList={''};
+% excludedPosList={};
 
 %导入收盘后数据    
 [pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
-[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct] = getQuotaInfo(s_date); %bondPct,ctaPct,
+[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date); %bondPct,ctaPct,
 
     
 if 0==f_calHKDiffDay
@@ -50,7 +50,7 @@ tmpL=unique(account.id);
 %计算trading pnl
 if ~isempty(trade)
     [isin,~]=ismember(trade.account,tmpL);
-    [tradingPnl]=calTradingPnl(account,trade(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct);   
+    [tradingPnl]=calTradingPnl(account,trade(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member);   
 end
 
 %入库
@@ -112,7 +112,7 @@ function [pos,trade] = getDBInfo(s_date,s_ydate,jtr)
     [trade]=getTradeInfo(s_date,jtr);
 end
 
-function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct] = getQuotaInfo(s_date) %bondPct,ctaPct,
+function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date) %bondPct,ctaPct,
     root_path='\\192.168.1.88\Trading Share\daily_quote\';
     if Utilities.isTradingDates(s_date, 'HK') 
         hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
@@ -127,6 +127,7 @@ function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct] = getQuotaInfo(s_date
     %     ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
         forexPct=readtable([root_path 'forex_' s_date '.csv']);
         optionPct=readtable([root_path 'option_' s_date '.csv']);
+        sc_member=readtable(['\\192.168.1.135\prod\research\avail_short\shsz_sc_members\' s_date '.shsz_sc_members.csv']);
     else
         stockPct=table;
         fundPct=table;
@@ -288,7 +289,7 @@ if Utilities.isTradingDates(s_date, 'SZ')
         forexPnl=-(posLongMV88+posShortMV88)*cusf;
         stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)=stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)+forexPnl;
     end
-
+    
     specialFee=outerjoin(stockSpecialFee,fundSpecialFee,'MergeKeys',true);
     specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee;
     specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
@@ -361,7 +362,7 @@ end
 
 %----------------------------------------------------------------%
 %计算trading pnl
-function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct)
+function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member)
 fprintf('Info(%s):calTradingPnl-getMultiplier! \n',datestr(now(),0));
 tmp_t=rowfun(@getMultiplier,trade,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
 trade=[trade tmp_t];
@@ -478,7 +479,7 @@ if ~isempty(option)
     optionFee.Properties.VariableNames('commission')={'commission_rate'};
     option=join(option,optionFee,'LeftKeys','account','RightKeys','id');    
     option.commission=rowfun(@calOptCom,option,'InputVariables',{'volume_option','tag','commission_rate'},'OutputFormat','uniform');
-    option.fee=zeros(size(option,1),1); % 暂时不计算fund的佣金
+    option.fee=zeros(size(option,1),1);
     option.OptionTradePnl=option.OptionTradePnl-option.commission-option.fee;
     optionTradePnl=varfun(@sum,option,'InputVariables',{'OptionTradePnl'},'GroupingVariables','account');
     optionTradePnl.GroupCount=[];
@@ -486,6 +487,19 @@ if ~isempty(option)
     optionFeePnl=varfun(@sum,option,'InputVariables',{'commission','fee'},'GroupingVariables','account');
 else
     optionTradePnl=table([],[],'VariableNames',{'Account','OptionTradePnl'});
+end
+
+ % deal with the sc member
+if ~isempty(stock(strcmp(stock.account,'96')==1,:))
+    fprintf('Info(%s):calTradingPnl-deal different commission rate of sc members! \n',datestr(now(),0));    
+    tp_trade=stock(strcmp(stock.account,'96')==1,:);
+    [isin,~]=ismember(tp_trade.symbol,sc_member.symbol);
+    qfii_trade=tp_trade(~isin,:);
+    qfiiFee=account{strcmp(account.id,'96')==1 & strcmp(account.sec_type,'QFII')==1,'commission'};
+    scFee=account{strcmp(account.id,'96')==1 & strcmp(account.sec_type,'STOCK')==1,'commission'};
+    qfiiTradeMv=qfii_trade.volume_stock.*qfii_trade.price;
+    qfiiFeePlus=sum(qfiiTradeMv)*(qfiiFee-scFee);
+    stockTradePnl(strcmp(stockTradePnl.Account,'96')==1,'StockTradePnl')={stockTradePnl{strcmp(stockTradePnl.Account,'96')==1,'StockTradePnl'}-qfiiFeePlus};
 end
 
 % 根据账号汇总
