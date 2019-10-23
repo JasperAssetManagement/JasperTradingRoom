@@ -58,6 +58,7 @@ if exist('tradingPnl','var')
 end
 sumCol=posPnl.Properties.VariableNames(2:end);
 sumCol(strcmp(sumCol,'FuPosPnlClose')==1)=[];
+sumCol(strcmp(sumCol,'FuTradePnlClose')==1)=[];
 sumCol(strcmp(sumCol,'SpecialFee')==1)=[];
 posPnl.TotalReturn=sum(posPnl{:,sumCol},2);
 posPnl.Trade_dt=repmat({s_date},size(posPnl,1),1);
