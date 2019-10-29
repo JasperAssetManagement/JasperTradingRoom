@@ -43,12 +43,14 @@ pos=pos(isin==0,:);
 
 tmpL=unique(account.id);
 [isin,~]=ismember(pos.account,tmpL);
-[posPnl]=calPositionPnl(account,pos(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
+pos=pos(isin==1,:);
+[posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
 
 %计算trading pnl
 if ~isempty(trade)
     [isin,~]=ismember(trade.account,tmpL);
-    [tradingPnl]=calTradingPnl(account,trade(isin==1,:),stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member);   
+    trade=trade(isin==1,:);
+    [tradingPnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member);   
 end
 
 %入库
@@ -63,22 +65,19 @@ sumCol(strcmp(sumCol,'SpecialFee')==1)=[];
 posPnl.TotalReturn=sum(posPnl{:,sumCol},2);
 posPnl.Trade_dt=repmat({s_date},size(posPnl,1),1);
 
-%合并账户
-if ~isempty(mergeAccount)
-    tmpKey=mergeAccount.keys;
-    for i_acc=1:length(tmpKey)
-        tmpT=table(tmpKey(i_acc),{s_date},'VariableNames',{'Account','Trade_dt'});
-        sub_accL=mergeAccount(tmpKey{i_acc});
-        [isin,~]=ismember(sub_accL,tmpL);
-        if sum(isin)>0            
-            sub_accL=sub_accL(isin);
-            tmpA=zeros(1, size(posPnl,2)-2);
-            for i_sub=1:length(sub_accL)
-                tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub_accL{i_sub})==1,2:end-1));
-            end
-            tmpT=[tmpT array2table(tmpA,'VariableNames',posPnl.Properties.VariableNames(2:end-1))];
-            posPnl=[posPnl;tmpT];
+% 先合并80，为了计算80的feeder的净值
+klist = {'80'};
+for i=1:length(klist)
+    tmpT=table(klist(i),{s_date},'VariableNames',{'Account','Trade_dt'});
+    sub=mergeAccount(klist{i});
+    [isin,~]=ismember(sub,tmpL);
+    if sum(isin)>0            
+        sub=sub(isin);
+        tmpA=zeros(1, size(posPnl,2)-2);
+        for i_sub=1:length(sub)
+            tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub{i_sub})==1,2:end-1));
         end
+        tmpT=[tmpT array2table(tmpA,'VariableNames',posPnl.Properties.VariableNames(2:end-1))];
     end
 end
 
@@ -87,13 +86,40 @@ otcpos=pos(strcmp(pos.type,'OTC')==1,:);
 if ~isempty(otcpos)
     conn=jtr.db88conn;
     sql='select Account, Windcode from [dbo].[OTCMap];';
-    otcmap=Utilities.getsqlrtn(conn,sql);
-    [isin,rows]=ismember(otcmap.Account,posPnl.Account);
-    fprintf('Error(%s): Main-(%s) is not is otc map. \n',datestr(now(),0),join(otcmap{isin==0,'Windcode'}));
-    otcpct=posPnl(rows(isin==1),{'Account','TotalReturn'});
-    otcpct=join(otcpct,otcmap,'MergeKeys',True);
-    otcpct.Properties.VariableNames('TotalReturn')={'change_price'};
-    posPnl=calOTCPnl(account,otcpos,otcpct,posPnl);
+    rowdata=Utilities.getsqlrtn(conn,sql);
+    otcmap=cell2table(rowdata,'VariableNames',{'Account','Windcode'});
+    [isin,rows]=ismember(otcmap.Account,tmpT.Account);
+    if sum(isin)==0
+        fprintf('Error(%s): Main-(%s) is not in otc map. \n',datestr(now(),0),join(otcmap{isin==0,'Windcode'}));
+    else
+        otcpct=tmpT(rows(isin==1),{'Account','TotalReturn'});
+        otcpct=join(otcpct,otcmap,'Keys','Account');
+        otcpct.Properties.VariableNames('TotalReturn')={'change_price'};
+        otcpct.Properties.VariableNames('Windcode')={'symbol'};
+        posPnl=calOTCPnl(account,otcpos,otcpct,posPnl);
+    end
+end
+
+%合并账户
+if ~isempty(mergeAccount)
+    tmpKey=mergeAccount.keys;
+    for i_acc=1:length(tmpKey)
+        tmpT=table(tmpKey(i_acc),{s_date},'VariableNames',{'Account','Trade_dt'});
+        variables=posPnl.Properties.VariableNames;
+        variables(strcmp(variables,'Trade_dt')==1)=[];
+        variables(strcmp(variables,'Account')==1)=[];
+        sub_accL=mergeAccount(tmpKey{i_acc});
+        [isin,~]=ismember(sub_accL,tmpL);
+        if sum(isin)>0            
+            sub_accL=sub_accL(isin);
+            tmpA=zeros(1, size(posPnl,2)-2);
+            for i_sub=1:length(sub_accL)
+                tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub_accL{i_sub})==1,variables));
+            end
+            tmpT=[tmpT array2table(tmpA,'VariableNames',variables)];
+            posPnl=[posPnl;tmpT];
+        end
+    end
 end
 
 if 1==f_updateDB        
@@ -531,9 +557,10 @@ end
 %----------------------------------------------------------------%
 function [posPnl]=calOTCPnl(account,pos,otcmap,posPnl)
 fprintf('Info(%s):calOTCPnl-deal otc records! \n',datestr(now(),0));
-pos=join(pos,otcmap,'MergeKeys',true);
-pos.posPnl=pos.change_price.*pos.volume; 
-OTCPosPnl=varfun(@sum,pos,'InputVariables','posPnl','GroupingVariables','Account');    
+pos=join(pos,otcmap,'Keys','symbol');
+pos.posPnl=pos.change_price.*pos.volume/10000; 
+pos.Account=[];    
+OTCPosPnl=varfun(@sum,pos,'InputVariables','posPnl','GroupingVariables','account');    
 OTCPosPnl.GroupCount=[];    
 OTCPosPnl.Properties.VariableNames={'Account','OTCPosPnl'};
 posPnl=outerjoin(posPnl,OTCPosPnl,'MergeKeys',true);
@@ -542,8 +569,9 @@ posPnl=fillmissing(posPnl,'constant',0,'DataVariables',@isnumeric);
 fprintf('Info(%s):calOTCPnl-add pnl(bps) 2 total Pnl, divide capital! \n',datestr(now(),0));
 tmpT=unique(account(:,{'id','capital'}));
 posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
-posPnl.OTCPosPnl=posPnl.OTCPosPnl./posPnl.capital;
+posPnl.OTCPosPnl=posPnl.OTCPosPnl./posPnl.capital*10000;
 posPnl.TotalReturn=posPnl.TotalReturn+posPnl.OTCPosPnl;
+posPnl.capital=[];
 end
 
 function [liusd, cusf] = getExtenalMarketInfo(tdate,tydate, w)    
