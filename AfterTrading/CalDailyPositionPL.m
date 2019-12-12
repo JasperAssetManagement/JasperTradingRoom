@@ -9,7 +9,7 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
 
 %导入收盘后数据    
 [pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
-[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date,s_ydate); %bondPct,ctaPct,
+[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = getQuotaInfo(s_date,s_ydate); %bondPct,ctaPct,
 
     
 if 0==f_calHKDiffDay
@@ -44,13 +44,13 @@ pos=pos(isin==0,:);
 tmpL=unique(account.id);
 [isin,~]=ismember(pos.account,tmpL);
 pos=pos(isin==1,:);
-[posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
+[posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
 
 %计算trading pnl
 if ~isempty(trade)
     [isin,~]=ismember(trade.account,tmpL);
     trade=trade(isin==1,:);
-    [tradingPnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member);   
+    [tradingPnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member);   
 end
 
 %入库
@@ -137,7 +137,7 @@ function [pos,trade] = getDBInfo(s_date,s_ydate,jtr)
     [trade]=getTradeInfo(s_date,jtr);
 end
 
-function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
+function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
     root_path='\\192.168.1.88\Trading Share\daily_quote\';
     if Utilities.isTradingDates(s_date, 'HK') 
         hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
@@ -149,7 +149,7 @@ function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member] = getQuotaI
         fundPct=readtable([root_path 'fund_' s_date '.csv']);
         fuPct=readtable([root_path 'future_' s_date '.csv']);
     %     bondPct=readtable([root_path 'bond_' s_date '.csv']);
-    %     ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
+        ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
         forexPct=readtable([root_path 'forex_' s_date '.csv']);
         optionPct=readtable([root_path 'option_' s_date '.csv']);
         sc_member=readtable(['\\192.168.1.135\prod\research\avail_short\shsz_sc_members\' s_ydate '.shsz_sc_members.csv']);
@@ -181,27 +181,35 @@ end
 function [trade]=getTradeInfo(s_date,jtr)
 fprintf('Info(%s): getTradeInfo-get (%s) Trade record. \n',datestr(now(),0),s_date);
     conn = jtr.db88conn;
-    sqlstr=strcat('SELECT [Account],[WindCode],qty*(1.5-side)*2,[Type],Price,OCtag',32,...
+    sqlstr=strcat('SELECT [Account],[WindCode],qty*(1.5-side)*2,[Type],Price,OCtag,isnull(commission,0) as commission,isnull(fee,0) as fee',32,...
         'FROM [JasperDB].[dbo].[JasperTradeDetail] where Trade_dt=''',s_date,''' order by account;'); 
     data=Utilities.getsqlrtn(conn,sqlstr);
     if size(data)<=0
         fprintf('getTradeInfo Error(%s): %s Trade record has not found in DB. \n',datestr(now(),0),s_date);
         trade=table;
     else
-        trade=cell2table(data,'VariableNames',{'account' 'symbol' 'volume' 'type' 'price' 'tag'}); 
+        trade=cell2table(data,'VariableNames',{'account' 'symbol' 'volume' 'type' 'price' 'tag' 'commission' 'fee'}); 
     end
 end
 
 function [multiplier] = getMultiplier(type,symbol)
 type=upper(type);
-if strcmp(type,'FU')==1
-    if strcmp(symbol{1}(1:2),'IC')==1
+if strcmpi(type,'FU')==1
+    if strcmpi(symbol{1}(1:2),'IC')==1
         multiplier=200;
     else
         multiplier=300;
     end
-elseif strcmp(type,'OPTION')==1
+elseif strcmpi(type,'OPTION')==1
     multiplier=10000;
+elseif strcmpi(type,'CTA')==1
+    if strcmpi(symbol{1}(1:2),'JM')==1
+        multiplier=60;
+    elseif strcmpi(symbol{1}(1:1),'I')==1
+        multiplier=100;
+    else
+        multiplier=10;
+    end
 else
     multiplier=1;
 end
@@ -216,7 +224,7 @@ end
 end
 
 %----------------------------------------------------------------%
-function [posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,liusd,dateDiff,cusf,s_date)
+function [posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,liusd,dateDiff,cusf,s_date)
 fprintf('Info(%s):calPositionPnl-getMultiplier! \n',datestr(now(),0));
 tmp_t=rowfun(@getMultiplier,pos,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
 pos=[pos tmp_t];
@@ -226,6 +234,7 @@ if Utilities.isTradingDates(s_date, 'SZ')
     future=pos(strcmp(pos.type,'FU')==1,:);
     fund=pos(strcmp(pos.type,'F')==1,:);
     option=pos(strcmp(pos.type,'Option')==1,:);
+    cta=pos(strcmp(pos.type,'CTA')==1,:);
     
     if ~isempty(stock)
         fprintf('Info(%s):calPositionPnl-Deal stock Records! \n',datestr(now(),0));
@@ -272,13 +281,24 @@ if Utilities.isTradingDates(s_date, 'SZ')
         fprintf('Info(%s):calPositionPnl-Deal option Records! \n',datestr(now(),0));
         checkRecords(option, optionPct);    
         option=join(option,optionPct,'Keys','symbol');    
-        fprintf('Info(%s):calPositionPnl-cal A share pnl! \n',datestr(now(),0));    
         option.posPnl=option.change_price.*option.volume_option.*option.multiplier; 
         optionPosPnl=varfun(@sum,option,'InputVariables','posPnl','GroupingVariables','account');
         optionPosPnl.GroupCount=[];
         optionPosPnl.Properties.VariableNames={'Account','OptionPosPnl'};
     else
         optionPosPnl=table;
+    end
+    
+    if ~isempty(cta)
+        fprintf('Info(%s):calPositionPnl-Deal cta Records! \n',datestr(now(),0));
+        checkRecords(cta, ctaPct);    
+        cta=join(cta,ctaPct,'Keys','symbol');    
+        cta.posPnl=cta.change_price.*cta.volume_cta.*cta.multiplier; 
+        ctaPosPnl=varfun(@sum,cta,'InputVariables','posPnl','GroupingVariables','account');
+        ctaPosPnl.GroupCount=[];
+        ctaPosPnl.Properties.VariableNames={'Account','CtaPosPnl'};
+    else
+        ctaPosPnl=table;
     end
     
     % deal with the pos fee of HK account
@@ -305,6 +325,16 @@ if Utilities.isTradingDates(s_date, 'SZ')
     else
         fundSpecialFee=table([],[],'VariableNames',{'Account','fundSpecialFee'});
     end
+    
+    if ~isempty(fund(strcmp(fund.account,'96')==1,:))      
+        tmp_pos=fund(strcmp(fund.account,'96')==1,:);
+        tmp_pos.SpecialFee=zeros(size(tmp_pos,1),1);
+        tmp_pos.SpecialFee=abs(tmp_pos.close.*tmp_pos.volume_fund*0.09/365*dateDiff);
+        tempSpecialFee=varfun(@sum,tmp_pos,'InputVariables','SpecialFee','GroupingVariables','account');
+        tempSpecialFee.GroupCount=[];
+        tempSpecialFee.Properties.VariableNames={'Account','fundSpecialFee'};
+        fundSpecialFee = [fundSpecialFee;tempSpecialFee];
+    end
 
     % deal with the forex pnl
     if ~isempty(stock(strcmp(stock.account,'88')==1,:))
@@ -316,6 +346,7 @@ if Utilities.isTradingDates(s_date, 'SZ')
     end
     
     specialFee=outerjoin(stockSpecialFee,fundSpecialFee,'MergeKeys',true);
+    specialFee=fillmissing(specialFee,'constant',0,'DataVariables',@isnumeric);
     specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee;
     specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
     specialFee.stockSpecialFee=[];
@@ -366,6 +397,9 @@ end
 if ~isempty(optionPosPnl)
     posPnl=outerjoin(posPnl,optionPosPnl,'MergeKeys',true);
 end
+if ~isempty(ctaPosPnl)
+    posPnl=outerjoin(posPnl,ctaPosPnl,'MergeKeys',true);  
+end
 if ~isempty(specialFee)
     posPnl=outerjoin(posPnl,specialFee,'MergeKeys',true);    
 else
@@ -387,7 +421,7 @@ end
 
 %----------------------------------------------------------------%
 %计算trading pnl
-function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,sc_member)
+function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member)
 fprintf('Info(%s):calTradingPnl-getMultiplier! \n',datestr(now(),0));
 tmp_t=rowfun(@getMultiplier,trade,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
 trade=[trade tmp_t];
@@ -397,6 +431,7 @@ hkstock=trade(strcmp(trade.type,'HKS')==1,:);
 future=trade(strcmp(trade.type,'FU')==1,:);
 fund=trade(strcmp(trade.type,'F')==1,:);
 option=trade(strcmp(trade.type,'Option')==1,:);
+cta=trade(strcmp(trade.type,'CTA')==1,:);
 
 defaultFee=0.001;
     function [fee]=calFee(price, vol)
@@ -514,6 +549,20 @@ else
     optionTradePnl=table([],[],'VariableNames',{'Account','OptionTradePnl'});
 end
 
+if ~isempty(cta)
+    fprintf('Info(%s):calTradingPnl-deal cta records! \n',datestr(now(),0));
+    checkRecords(cta, ctaPct);
+    cta=join(cta,ctaPct,'Keys','symbol');
+    cta.CtaTradePnl=(cta.settle-cta.price).*cta.volume_cta.*cta.multiplier;    
+    cta.CtaTradePnl=cta.CtaTradePnl-cta.commission-cta.fee;
+    ctaTradePnl=varfun(@sum,cta,'InputVariables',{'CtaTradePnl'},'GroupingVariables','account');
+    ctaTradePnl.GroupCount=[];
+    ctaTradePnl.Properties.VariableNames={'Account','CtaTradePnl'}; 
+    ctaFeePnl=varfun(@sum,option,'InputVariables',{'commission','fee'},'GroupingVariables','account');
+else
+    ctaTradePnl=table([],[],'VariableNames',{'Account','CtaTradePnl'});
+end
+
  % deal with the sc member
 if ~isempty(stock(strcmp(stock.account,'96')==1,:))
     fprintf('Info(%s):calTradingPnl-deal different commission rate of sc members! \n',datestr(now(),0));    
@@ -542,6 +591,9 @@ if ~isempty(fundTradePnl)
 end
 if ~isempty(optionTradePnl)
     tradePnl=outerjoin(tradePnl,optionTradePnl,'MergeKeys',true); 
+end
+if ~isempty(ctaTradePnl)
+    tradePnl=outerjoin(tradePnl,ctaTradePnl,'MergeKeys',true); 
 end
 tradePnl=fillmissing(tradePnl,'constant',0,'DataVariables',@isnumeric); 
 
