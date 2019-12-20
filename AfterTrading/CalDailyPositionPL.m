@@ -75,7 +75,9 @@ for i=1:length(klist)
         sub=sub(isin);
         tmpA=zeros(1, size(posPnl,2)-2);
         for i_sub=1:length(sub)
-            tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub{i_sub})==1,2:end-1));
+            if ~isempty(find(strcmp(posPnl.Account,sub{i_sub})==1, 1))
+                tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub{i_sub})==1,2:end-1));
+            end
         end
         tmpT=[tmpT array2table(tmpA,'VariableNames',posPnl.Properties.VariableNames(2:end-1))];
     end
@@ -114,7 +116,9 @@ if ~isempty(mergeAccount)
             sub_accL=sub_accL(isin);
             tmpA=zeros(1, size(posPnl,2)-2);
             for i_sub=1:length(sub_accL)
-                tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub_accL{i_sub})==1,variables));
+                if ~isempty(find(strcmp(posPnl.Account,sub_accL{i_sub})==1, 1))
+                    tmpA=tmpA+table2array(posPnl(strcmp(posPnl.Account,sub_accL{i_sub})==1,variables));
+                end
             end
             tmpT=[tmpT array2table(tmpA,'VariableNames',variables)];
             posPnl=[posPnl;tmpT];
