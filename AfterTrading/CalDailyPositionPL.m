@@ -205,8 +205,10 @@ elseif strcmpi(type,'OPTION')==1
 elseif strcmpi(type,'CTA')==1
     if strcmpi(symbol{1}(1:2),'JM')==1
         multiplier=60;
-    elseif strcmpi(symbol{1}(1:1),'I')==1
+    elseif strcmpi(symbol{1}(1:1),'I')==1 || strcmpi(symbol{1}(1:1),'J')==1
         multiplier=100;
+    elseif strcmpi(symbol{1}(1:1),'L')==1 || strcmpi(symbol{1}(1:1),'V')==1 || strcmpi(symbol{1}(1:2),'CF')==1 || strcmpi(symbol{1}(1:2),'TA')==1
+        multiplier=5;
     else
         multiplier=10;
     end
