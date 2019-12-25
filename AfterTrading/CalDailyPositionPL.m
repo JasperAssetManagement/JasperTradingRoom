@@ -197,24 +197,11 @@ fprintf('Info(%s): getTradeInfo-get (%s) Trade record. \n',datestr(now(),0),s_da
 end
 
 function [multiplier] = getMultiplier(type,symbol)
-type=upper(type);
 if strcmpi(type,'FU')==1
     if strcmpi(symbol{1}(1:2),'IC')==1
         multiplier=200;
     else
         multiplier=300;
-    end
-elseif strcmpi(type,'OPTION')==1
-    multiplier=10000;
-elseif strcmpi(type,'CTA')==1
-    if strcmpi(symbol{1}(1:2),'JM')==1
-        multiplier=60;
-    elseif strcmpi(symbol{1}(1:1),'I')==1 || (strcmpi(symbol{1}(1:1),'J')==1 && strcmpi(symbol{1}(1:2),'JD')~=1)
-        multiplier=100;
-    elseif strcmpi(symbol{1}(1:1),'L')==1 || strcmpi(symbol{1}(1:1),'V')==1 || strcmpi(symbol{1}(1:2),'CF')==1 || strcmpi(symbol{1}(1:2),'TA')==1
-        multiplier=5;
-    else
-        multiplier=10;
     end
 else
     multiplier=1;
@@ -232,8 +219,7 @@ end
 %----------------------------------------------------------------%
 function [posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,liusd,dateDiff,cusf,s_date)
 fprintf('Info(%s):calPositionPnl-getMultiplier! \n',datestr(now(),0));
-tmp_t=rowfun(@getMultiplier,pos,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
-pos=[pos tmp_t];
+
 %处理股票
 if Utilities.isTradingDates(s_date, 'SZ')     
     stock=pos(strcmp(pos.type,'S')==1,:);    
@@ -257,6 +243,8 @@ if Utilities.isTradingDates(s_date, 'SZ')
     if ~isempty(future)
         fprintf('Info(%s):calPositionPnl-Deal future Records! \n',datestr(now(),0));
         checkRecords(future, fuPct);  
+        tmp_t=rowfun(@getMultiplier,future,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
+        future=[future tmp_t];    
         future=join(future,fuPct,'Keys','symbol');   
         future.posPnlClose=(future.close-future.pre_close).*future.volume_future.*future.multiplier;
         future.posPnlSettle=(future.settle-future.pre_settle).*future.volume_future.*future.multiplier;
@@ -429,8 +417,6 @@ end
 %计算trading pnl
 function [tradePnl]=calTradingPnl(account,trade,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member)
 fprintf('Info(%s):calTradingPnl-getMultiplier! \n',datestr(now(),0));
-tmp_t=rowfun(@getMultiplier,trade,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
-trade=[trade tmp_t];
 
 stock=trade(strcmp(trade.type,'S')==1,:);
 hkstock=trade(strcmp(trade.type,'HKS')==1,:);
@@ -489,6 +475,8 @@ end
 if ~isempty(future)
     fprintf('Info(%s):calTradingPnl-deal future records! \n',datestr(now(),0));
     checkRecords(future, fuPct);
+    tmp_t=rowfun(@getMultiplier,future,'InputVariables',{'type','symbol'},'OutputVariableNames','multiplier');
+    future=[future tmp_t];
     future=join(future,fuPct,'Keys','symbol');
     future.FuTradePnlClose=(future.close-future.price).*future.volume_future.*future.multiplier;
     future.FuTradePnlSettle=(future.settle-future.price).*future.volume_future.*future.multiplier;
