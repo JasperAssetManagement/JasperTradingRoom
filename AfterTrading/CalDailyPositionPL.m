@@ -143,11 +143,11 @@ end
 
 function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
     root_path='\\192.168.1.88\Trading Share\daily_quote\';
-    if Utilities.isTradingDates(s_date, 'HK') 
-        hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
-    else
-        hkPct=table;
-    end
+%     if Utilities.isTradingDates(s_date, 'HK') 
+    hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
+%     else
+%         hkPct=table;
+%     end
     if Utilities.isTradingDates(s_date, 'SZ') 
         stockPct=readtable([root_path 'stock_' s_date '.csv']);
         fundPct=readtable([root_path 'fund_' s_date '.csv']);
@@ -354,9 +354,10 @@ else
     specialFee=table;
 end
 
-if Utilities.isTradingDates(s_date, 'HK') 
-    fprintf('Info(%s):calPositionPnl-cal HK share pnl! \n',datestr(now(),0));
-    hkstock=pos(strcmp(pos.type,'HKS')==1,:);
+% if Utilities.isTradingDates(s_date, 'HK') 
+fprintf('Info(%s):calPositionPnl-cal HK share pnl! \n',datestr(now(),0));
+hkstock=pos(strcmp(pos.type,'HKS')==1,:);
+if ~isempty(hkstock)
     checkRecords(hkstock, hkPct);
     hkstock=join(hkstock,hkPct,'Keys','symbol');
     hkstock.posPnl=hkstock.change_price.*hkstock.volume_hkstock*forexPct.close(cellfun(@(x) contains(x,'HKDCNY'),forexPct.symbol));
