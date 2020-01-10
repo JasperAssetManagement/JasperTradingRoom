@@ -1,4 +1,4 @@
-function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,w,excludedPosList)
+function [] = CalDailyPositionPL(s_date,account,mergeAccount,f_updateDB,f_calHKDiffDay,excludedPosList)
 %% calculate the position pnl
 jtr = JasperTradingRoom;
 s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyyymmdd');
@@ -14,7 +14,7 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
     
 if 0==f_calHKDiffDay
     %s_date2=Utilities.tradingdate(today,-2,'outputStyle','yyyymmdd');
-    [liusd, cusf]=getExtenalMarketInfo(s_date,s_ydate, w); 
+    [liusd, cusf]=getExtenalMarketInfo(s_date); 
     %w_data=[2.069,2.3416];
     dateDiff=Utilities.calDateDiff(s_ydate,s_date); %calculate the natural date diff 
 else
@@ -621,14 +621,18 @@ posPnl.TotalReturn=posPnl.TotalReturn+posPnl.OTCPosPnl;
 posPnl.capital=[];
 end
 
-function [liusd, cusf] = getExtenalMarketInfo(tdate,tydate, w)    
-    s_date=Utilities.tradingdate(datenum(tdate,'yyyymmdd'),-1,'outputStyle','yyyymmdd'); 
-    tpd=w.wsd('LIUSD1M.IR,LIUSD3M.IR','close',s_date,s_date); 
-    while ~isnumeric(tpd)
-        s_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),-1,'outputStyle','yyyymmdd'); 
-        tpd=w.wsd('LIUSD1M.IR,LIUSD3M.IR','close',s_date,s_date); 
-    end
-    liusd = tpd;
-    
-    cusf=w.wsd('USDCNY.EX','close',tdate,tdate)/w.wsd('USDCNY.EX','close',tydate,tydate)-1;    
+function [liusd, cusf] = getExtenalMarketInfo(tdate)    
+%     s_date=Utilities.tradingdate(datenum(tdate,'yyyymmdd'),-1,'outputStyle','yyyymmdd'); 
+%     tpd=w.wsd('LIUSD1M.IR,LIUSD3M.IR','close',s_date,s_date); 
+%     while ~isnumeric(tpd)
+%         s_date=Utilities.tradingdate(datenum(s_date,'yyyymmdd'),-1,'outputStyle','yyyymmdd'); 
+%         tpd=w.wsd('LIUSD1M.IR,LIUSD3M.IR','close',s_date,s_date); 
+%     end
+%     liusd = tpd;
+%     
+%     cusf=w.wsd('USDCNY.EX','close',tdate,tdate)/w.wsd('USDCNY.EX','close',tydate,tydate)-1; 
+root_path = '\\192.168.1.88\Trading Share\daily_quote\';
+tpt = readtable([root_path 'forex_' tdate '.csv']);
+liusd = tpt.pre_close(cellfun(@(x) contains(x,'LIUSD'),tpt.symbol));
+cusf = tpt.pct_chg(cellfun(@(x) contains(x,'USDCNY'),tpt.symbol));
 end

@@ -14,7 +14,7 @@ else
     date=datestr(today(),'yyyymmdd');
 end
 ydate=Utilities.tradingdate(datenum(date,'yyyymmdd'),-1,'outputStyle','yyyymmdd');
-w=windmatlab;
+
 %1.0 取Pos(JasperPositionNew是已经处理过送股的持仓数量
 conn=jtr.db88conn;
 sql=['select WindCode,(3-2*side)*Qty as qty,Type FROM [JasperDB].[dbo].[JasperPositionNew] where account=''' accId ''' and Trade_dt=''' ydate ''';'];
@@ -68,5 +68,4 @@ tpos.dzqty=repmat({0},size(tpos,1),1);
 conn=jtr.db88conn;
 res=Utilities.upsert(conn,'JasperDB.dbo.JasperPosition',tpos.Properties.VariableNames,[1 0 0 1 1 1 0 0 0 1 0],table2cell(tpos));
 fprintf('Info(%s):upsert %s position(%s):insert %d,update %d \n',datestr(now(),0),date,accId,sum(res==1),sum(res==0)); 
-w.close;
 end
