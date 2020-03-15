@@ -8,8 +8,8 @@ s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), -1, 'outputStyle','yyy
 % hks_ydate=Utilities.tradingdate(datenum(s_ydate,'yyyymmdd'),0,'market','HK','outputStyle','yyyymmdd');
 
 %导入收盘后数据    
-[pos,trade]=getDBInfo(s_date,s_ydate,jtr);    
-[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = getQuotaInfo(s_date,s_ydate); %bondPct,ctaPct,
+[pos,trade,pos_margin,cash_pos_margin]=getDBInfo(s_date,s_ydate,jtr);    
+[stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,cashPct,sc_member] = getQuotaInfo(s_date,s_ydate); %bondPct,ctaPct,
 
     
 if 0==f_calHKDiffDay
@@ -44,7 +44,7 @@ pos=pos(isin==0,:);
 tmpL=unique(account.id);
 [isin,~]=ismember(pos.account,tmpL);
 pos=pos(isin==1,:);
-[posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
+[posPnl]=calPositionPnl(account,pos,pos_margin,cash_pos_margin,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,cashPct,liusd,dateDiff,cusf,s_date); %bondPct,ctaPct,
 
 %计算trading pnl
 if ~isempty(trade)
@@ -125,7 +125,6 @@ if ~isempty(mergeAccount)
         end
     end
 end
-
 if 1==f_updateDB        
     conn=jtr.db88conn;
     res = upsert(conn,'JasperDB.dbo.AccountDetail',posPnl.Properties.VariableNames,{'Trade_dt','Account'},table2cell(posPnl));     
@@ -135,13 +134,15 @@ end
 
 end
 
-function [pos,trade] = getDBInfo(s_date,s_ydate,jtr)
+function [pos,trade,pos_margin,cash_pos_margin] = getDBInfo(s_date,s_ydate,jtr)
 %导入收盘后数据     
     [pos]=getPosition(s_ydate,jtr);     
     [trade]=getTradeInfo(s_date,jtr);
+    [pos_margin]=getMarginPos(s_date,jtr);
+    cash_pos_margin=pos(ismember(pos.account, unique(pos_margin.account))&strcmp(pos.type, 'C')==1,:);    
 end
 
-function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
+function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,cashPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
     root_path='\\192.168.1.88\Trading Share\daily_quote\';
 %     if Utilities.isTradingDates(s_date, 'HK') 
     hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
@@ -156,12 +157,14 @@ function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,sc_member] = ge
         ctaPct=readtable([root_path 'cta_' s_date '.csv']);   
         forexPct=readtable([root_path 'forex_' s_date '.csv']);
         optionPct=readtable([root_path 'option_' s_date '.csv']);
+        cashPct=readtable([root_path 'cash_' s_date '.csv']);
         sc_member=readtable(['\\192.168.1.135\prod\research\avail_short\shsz_sc_members\' s_ydate '.shsz_sc_members.csv']);
     else
         stockPct=table;
         fundPct=table;
         fuPct=table;        
         optionPct=table;
+        cashPct=table;
         s_ydate=Utilities.tradingdate(datenum(s_date,'yyyymmdd'), 0, 'outputStyle','yyyymmdd');
         forexPct=readtable([root_path 'forex_' s_ydate '.csv']);
     end
@@ -196,6 +199,20 @@ fprintf('Info(%s): getTradeInfo-get (%s) Trade record. \n',datestr(now(),0),s_da
     end
 end
 
+% get margin call pos to calculate fee
+function [pos_margin]=getMarginPos(s_date, jtr)
+fprintf('Info(%s): getMarginPos-get (%s) Margin position. \n',datestr(now(),0),s_date);
+    conn = jtr.db88conn;
+    sqlstr = ['SELECT Account, WindCode, BorrowQty, Type FROM [dbo].[JasperBorrowRecords] where trade_dt = ''' s_date ''''];
+    data=Utilities.getsqlrtn(conn,sqlstr);
+    if size(data)<=0
+        fprintf('getMarginPos Info(%s): %s Margin position has not found in DB. \n',datestr(now(),0),s_date);
+        pos_margin=table;
+    else
+        pos_margin=cell2table(data,'VariableNames',{'account' 'symbol' 'volume' 'type'}); 
+    end
+end
+
 function [multiplier] = getMultiplier(type,symbol)
 if strcmpi(type,'FU')==1
     if strcmpi(symbol{1}(1:2),'IC')==1
@@ -217,7 +234,7 @@ end
 end
 
 %----------------------------------------------------------------%
-function [posPnl]=calPositionPnl(account,pos,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,liusd,dateDiff,cusf,s_date)
+function [posPnl]=calPositionPnl(account,pos,pos_margin,cash_pos_margin,stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,cashPct,liusd,dateDiff,cusf,s_date)
 fprintf('Info(%s):calPositionPnl-getMultiplier! \n',datestr(now(),0));
 
 %处理股票
@@ -339,12 +356,61 @@ if Utilities.isTradingDates(s_date, 'SZ')
         stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)=stockSpecialFee.stockSpecialFee(strcmp(stockSpecialFee.Account,'88')==1)+forexPnl;
     end
     
+    % cal margin call fee   
+    if ~isempty(pos_margin)
+        marginFee=account(strcmp(account.sec_type,'MARGIN')==1,{'id','commission','min_commission'});
+        marginFee.Properties.VariableNames('commission')={'commission_rate'};
+        checkRecords(cash_pos_margin,cashPct)
+        pos_margin.account=rowfun(@(x) marginFee.id(contains(x, marginFee.id)),pos_margin,'InputVariables',{'account'},'OutputFormat','uniform');
+        pos_margin=join(pos_margin,marginFee,'LeftKeys','account','RightKeys','id');        
+%         pos_margin.commission_rate=rowfun(@(x) marginFee.commission_rate(contains(x, marginFee.id)),pos_margin,'InputVariables',{'account'},'OutputFormat','uniform');
+        pos_margin_s=pos_margin(strcmp(pos_margin.type,'S')==1,:);
+        pos_margin_s=join(pos_margin_s,stockPct,'Keys','symbol');  
+        pos_margin_s.stockMarginSpecialFee=pos_margin_s.volume_pos_margin_s.*pos_margin_s.close.*pos_margin_s.commission_rate/250;
+        pos_marginSpecialFee=varfun(@sum,pos_margin_s,'InputVariables','stockMarginSpecialFee','GroupingVariables','account');
+        pos_marginSpecialFee.GroupCount=[];
+        pos_marginSpecialFee.Properties.VariableNames={'Account','stockMarginSpecialFee'};
+        
+        pos_margin_f=pos_margin(strcmp(pos_margin.type,'F')==1,:);
+        if ~isempty(pos_margin_f)
+            pos_margin_f=join(pos_margin_f,fundPct,'Keys','symbol'); 
+            pos_margin_f.fundMarginSpecialFee=pos_margin_f.volume_pos_margin_f.*pos_margin_f.close.*pos_margin_f.commission_rate/250; 
+            tmp_f_fee=varfun(@sum,pos_margin_f,'InputVariables','fundMarginSpecialFee','GroupingVariables','account');
+            tmp_f_fee.GroupCount=[];
+            tmp_f_fee.Properties.VariableNames={'Account','fundMarginSpecialFee'};
+            pos_marginSpecialFee=outerjoin(pos_marginSpecialFee,tmp_f_fee,'MergeKeys',true);
+            pos_marginSpecialFee=fillmissing(pos_marginSpecialFee,'constant',0,'DataVariables',@isnumeric);
+        else
+            pos_marginSpecialFee.fundMarginSpecialFee=0;
+        end
+        
+        if ~isempty(cash_pos_margin)
+            cash_pos_margin.account=rowfun(@(x) marginFee.id(contains(x, marginFee.id)),cash_pos_margin,'InputVariables',{'account'},'OutputFormat','uniform');
+            cash_pos_margin=join(cash_pos_margin,cashPct,'Keys','symbol');
+            cash_pos_margin.interest=cash_pos_margin.volume.*cash_pos_margin.mmf_annualizedyield/250;    
+            tmp_interest=varfun(@sum,cash_pos_margin,'InputVariables','interest','GroupingVariables','account');
+            tmp_interest.GroupCount=[];
+            tmp_interest.Properties.VariableNames={'Account','interest'};
+            pos_marginSpecialFee=outerjoin(pos_marginSpecialFee,tmp_interest,'MergeKeys',true);
+            pos_marginSpecialFee=fillmissing(pos_marginSpecialFee,'constant',0,'DataVariables',@isnumeric);    
+        else
+            pos_marginSpecialFee.interest=0;
+        end
+        
+        pos_marginSpecialFee.pos_marginSpecialFee=pos_marginSpecialFee.stockMarginSpecialFee+pos_marginSpecialFee.fundMarginSpecialFee-pos_marginSpecialFee.interest;
+        pos_marginSpecialFee.stockMarginSpecialFee=[];
+        pos_marginSpecialFee.fundMarginSpecialFee=[];
+        pos_marginSpecialFee.interest=[];
+    end        
+    
     specialFee=outerjoin(stockSpecialFee,fundSpecialFee,'MergeKeys',true);
+    specialFee=outerjoin(specialFee,pos_marginSpecialFee,'MergeKeys',true);
     specialFee=fillmissing(specialFee,'constant',0,'DataVariables',@isnumeric);
-    specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee;
+    specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee+specialFee.pos_marginSpecialFee;
     specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
     specialFee.stockSpecialFee=[];
-    specialFee.fundSpecialFee=[];    
+    specialFee.fundSpecialFee=[];   
+    specialFee.pos_marginSpecialFee=[];
 else
     stockPosPnl=table;
     futurePosPnlClose=table;
@@ -435,13 +501,14 @@ defaultFee=0.001;
         end
     end
 
+    stockFee=account(strcmp(account.sec_type,'STOCK')==1,{'id','commission','min_commission'});
+    stockFee.Properties.VariableNames('commission')={'commission_rate'};
+    
 if ~isempty(stock)
     fprintf('Info(%s):calTradingPnl-deal stock records! \n',datestr(now(),0));
     checkRecords(stock, stockPct);
     stock=join(stock,stockPct,'Keys','symbol');
-    stock.StockTradePnl=(stock.close-stock.price).*stock.volume_stock;
-    stockFee=account(strcmp(account.sec_type,'STOCK')==1,{'id','commission','min_commission'});
-    stockFee.Properties.VariableNames('commission')={'commission_rate'};
+    stock.StockTradePnl=(stock.close-stock.price).*stock.volume_stock; 
     stock=join(stock,stockFee,'LeftKeys','account','RightKeys','id');
     stock.commission=stock.price.*abs(stock.volume_stock).*stock.commission_rate;
     stock.commission=rowfun(@(x,y) max(x,y),stock,'InputVariables',{'commission','min_commission'},'OutputFormat','uniform');

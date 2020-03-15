@@ -16,13 +16,13 @@ end
 s_ydate=Utilities.tradingdate(datenum(date,'yyyymmdd'),-1,'outputStyle','yyyymmdd');
 hks_ydate=Utilities.tradingdate(datenum(date,'yyyymmdd'),-1,'outputStyle','yyyymmdd','market','HK');
 [pos] = getPosition(s_ydate,jtr);
-[hkPct] = getQuotaInfo(pos,date,w);
+[hkPct] = getQuotaInfo(date);
 [ret] = calcReturn(pos,hkPct);
 
 volData=[];
 for i=1:size(ret.accounts,1)
     % default net value = 1, then update nv=yestNV*(1+total return)
-    volData=[volData; {date},ret.accounts(i),{ret.totalReturn(i)*10000},{1*(1+ret.totalReturn(i))}];
+    volData=[volData; {date},ret.accounts(i),{ret.totalReturn(i)*100},{1*(1+ret.totalReturn(i)/100)}];
 end
 
     conn=jtr.db88conn;
@@ -56,6 +56,7 @@ function [pos] = getPosition(s_ydate,jtr)
 end
 %get Quota info
 function [hkPct] = getQuotaInfo(s_date)   
+    root_path = '\\192.168.1.88\Trading Share\daily_quote\';
     hkPct=readtable([root_path 'hkstock_' s_date '.csv']);
 end
 % calculate daily return
