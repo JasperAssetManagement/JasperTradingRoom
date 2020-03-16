@@ -62,6 +62,7 @@ sumCol=posPnl.Properties.VariableNames(2:end);
 sumCol(strcmp(sumCol,'FuPosPnlClose')==1)=[];
 sumCol(strcmp(sumCol,'FuTradePnlClose')==1)=[];
 sumCol(strcmp(sumCol,'SpecialFee')==1)=[];
+sumCol(strcmp(sumCol,'MarginInterest')==1)=[];
 posPnl.TotalReturn=sum(posPnl{:,sumCol},2);
 posPnl.Trade_dt=repmat({s_date},size(posPnl,1),1);
 
@@ -139,7 +140,11 @@ function [pos,trade,pos_margin,cash_pos_margin] = getDBInfo(s_date,s_ydate,jtr)
     [pos]=getPosition(s_ydate,jtr);     
     [trade]=getTradeInfo(s_date,jtr);
     [pos_margin]=getMarginPos(s_date,jtr);
-    cash_pos_margin=pos(ismember(pos.account, unique(pos_margin.account))&strcmp(pos.type, 'C')==1,:);    
+    if ~isempty(pos_margin)
+        cash_pos_margin=pos(ismember(pos.account, unique(pos_margin.account))&strcmp(pos.type, 'C')==1,:);    
+    else
+        cash_pos_margin=table;
+    end
 end
 
 function [stockPct,fundPct,hkPct,fuPct,forexPct,optionPct,ctaPct,cashPct,sc_member] = getQuotaInfo(s_date,s_ydate) %bondPct,ctaPct,
@@ -404,13 +409,18 @@ if Utilities.isTradingDates(s_date, 'SZ')
     end        
     
     specialFee=outerjoin(stockSpecialFee,fundSpecialFee,'MergeKeys',true);
-    specialFee=outerjoin(specialFee,pos_marginSpecialFee,'MergeKeys',true);
-    specialFee=fillmissing(specialFee,'constant',0,'DataVariables',@isnumeric);
-    specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee+specialFee.pos_marginSpecialFee;
-    specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
+    specialFee=fillmissing(specialFee,'constant',0,'DataVariables',@isnumeric);   
+    specialFee.SpecialFee=specialFee.stockSpecialFee+specialFee.fundSpecialFee;
     specialFee.stockSpecialFee=[];
-    specialFee.fundSpecialFee=[];   
-    specialFee.pos_marginSpecialFee=[];
+    specialFee.fundSpecialFee=[];  
+    if ~isempty(pos_marginSpecialFee)
+        specialFee=outerjoin(specialFee,pos_marginSpecialFee,'MergeKeys',true);
+        specialFee=fillmissing(specialFee,'constant',0,'DataVariables',@isnumeric); 
+        specialFee.SpecialFee=specialFee.SpecialFee+specialFee.pos_marginSpecialFee;        
+        specialFee.pos_marginSpecialFee=[];
+    end
+    specialFee.SpecialFee(isnan(specialFee.SpecialFee))=0;
+    
 else
     stockPosPnl=table;
     futurePosPnlClose=table;
@@ -477,7 +487,8 @@ tmpT=unique(account(:,{'id','capital'}));
 posPnl=join(posPnl,tmpT,'LeftKeys','Account','RightKeys','id');
 tmpPnl=varfun(@(x) x./posPnl.capital*10000,posPnl,'InputVariables',posPnl.Properties.VariableNames(2:end-1));
 tmpPnl.Properties.VariableNames=posPnl.Properties.VariableNames(2:end-1);
-posPnl=[posPnl(:,1),tmpPnl];
+posPnl.Properties.VariableNames('SpecialFee')={'MarginInterest'};
+posPnl=[posPnl(:,1),tmpPnl,posPnl(:,'MarginInterest')];
 end
 
 %----------------------------------------------------------------%
